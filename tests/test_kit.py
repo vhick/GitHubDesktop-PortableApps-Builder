@@ -69,10 +69,35 @@ class SafeAdapters(unittest.TestCase):
         self.assertNotIn('transpileOnly', script)
         self.assertNotIn('skipLibCheck', script)
 
-    def test_b1r2_fresh_build_revision(self):
+    def test_latest_fresh_build_revision(self):
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r2', workflow)
+        self.assertIn('default: r3', workflow)
         self.assertIn('scripts/build_source.ps1', workflow)
+
+    def test_b1r3_launcher_compiler_avoids_nested_windows_cmd_quoting(self):
+        # Failure reproduced by user's b1r2 log: CMD split the Visual Studio path.
+        script=(ROOT/'scripts/compile_launcher.ps1').read_text(encoding='utf-8')
+        self.assertIn('Launch-VsDevShell.ps1',script)
+        self.assertIn('-Arch amd64 -HostArch amd64 -SkipAutomaticLocation',script)
+        self.assertIn("Get-Command 'cl.exe'",script)
+        self.assertIn('& $cl.Source',script)
+        self.assertIn('"/Fo:$obj"',script)
+        self.assertIn('"/Fe:$out"',script)
+        self.assertNotIn('cmd.exe /D /C',script)
+        self.assertNotIn('compile-launcher.cmd',script)
+        self.assertNotIn('Set-Content -LiteralPath $batch',script)
+        self.assertNotIn('vcvars64.bat',script)
+
+    def test_b1r3_launcher_compiler_checks_exit_arch_and_revision(self):
+        script=(ROOT/'scripts/compile_launcher.ps1').read_text(encoding='utf-8')
+        self.assertIn('$exitCode = $LASTEXITCODE',script)
+        self.assertIn('if ($exitCode -ne 0)',script)
+        self.assertIn('ReadUInt32() -ne 0x00004550',script)
+        self.assertIn('ReadUInt16() -ne 0x8664',script)
+        self.assertIn('user32.lib shell32.lib',script)
+        workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
+        self.assertIn('default: r3',workflow)
+        self.assertIn('scripts/compile_launcher.ps1',workflow)
 
     def test_launcher_has_no_broad_delete(self):
         text=(ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')

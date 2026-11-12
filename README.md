@@ -1,10 +1,16 @@
-# GitHub Desktop PortableApps Builder Kit — b1r2 (experimental)
+# GitHub Desktop PortableApps Builder Kit — b1r3 (experimental)
 
 **Selected mode:** PORTABLEAPPS only. **Target architecture:** Windows x64.
 
 This independent repository builds **GitHub Desktop from the exact stable upstream tag** (currently source-audited `release-3.6.10`), adds an early in-process Electron profile redirection, compiles a genuine Win64 root launcher, stages a PortableApps-compatible package, independently validates a ZIP, invokes the pinned shared custom-NSIS installer action, then publishes using the pinned Universal Release Publisher.
 
 This kit is **not** an official GitHub Desktop portable distribution. No packaged Windows executable, Windows GUI test, or published release was produced during authoring of this kit. It has **not yet been proven fully portable**. It is intentionally conservative about credentials, authentication protocol handling, and notifications; see `docs/PORTABILITY-AUDIT.md` and `docs/VALIDATION.md` before relying on it.
+
+## b1r3 correction (2026-11-12)
+
+The user's b1r2 GitHub Actions logs showed a **successful complete GitHub Desktop 3.6.10 Electron source build** and a failure in the **separate C++ launcher compilation** step. `compile_launcher.ps1` created a transient batch file, then launched it with nested PowerShell/CMD quoting. Windows CMD split the Visual Studio path containing spaces and failed before invoking `cl.exe`.
+
+b1r3 replaces the brittle batch file with Microsoft's documented Visual Studio `Launch-VsDevShell.ps1` in the current PowerShell process, then invokes `cl.exe` directly using argument-array boundaries and checks the resulting x64 PE. The change is confined to the launcher compiler step and regression tests; no upstream source adapters, data handling or shared actions are changed. No completed b1r3 Windows build or GUI runtime test is claimed.
 
 ## Quick start with GitHub Desktop (no local compiler required)
 
@@ -13,9 +19,9 @@ This kit is **not** an official GitHub Desktop portable distribution. No package
 3. Extract this kit ZIP **into that repository's root**. Ensure `.github/workflows/build-portableapps.yml` exists; on Windows, hidden dot folders may not be visible unless hidden files are shown.
 4. In GitHub Desktop, verify all added files, enter a commit message, choose **Commit to main**, and **Push origin**. No `git init` and no local compiler are required.
 5. In the browser, open the new repository → **Actions** → **Build GitHub Desktop PortableApps (source-built x64)** → **Run workflow**.
-6. Leave `upstream_version=latest` and `package_revision=r2`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
+6. Leave `upstream_version=latest` and `package_revision=r3`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
 7. Inspect the Actions job logs. It downloads source/submodules and compiles the real Electron Windows app; successful compilation alone does **not** mean portability is verified.
-8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r2.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
+8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r3.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
 9. Extract the ZIP to a regular folder or USB drive, or run the independent PortableApps-style installer. In the PortableApps Platform, refresh the app menu. Start `GitHubDesktopPortable.exe` **in the package root**.
 10. Your retained profile and Git global config are under `GitHubDesktopPortable/Data/`. To upgrade, close GitHub Desktop, **back up Data**, replace `App/`, `Other/` and the root launcher while preserving `Data/` unchanged; or select the **same existing portable folder** in the installer. Never merge installed `%APPDATA%` profiles automatically.
 11. Rollback: fully exit the app, back up `Data`, restore old `App`, `Other`, and launcher together. A newer profile/database schema may not work with an older app; never discard the newer Data backup.
@@ -24,7 +30,7 @@ This kit is **not** an official GitHub Desktop portable distribution. No package
 
 The b1r1 run failed at `source-build-and-package / 10_Build actual modified GitHub Desktop application from source` while executing upstream `script/post-install.ts`. Errors TS7016 and TS7006 for `glob` arose because b1r1 set `NODE_ENV=production` **before** Yarn Classic installed dependencies, unintentionally excluding upstream `devDependencies` (`@types/glob`). This kit sets `NODE_ENV=development` while installing, passes explicit `--production=false` to root Yarn, verifies the real `@types/glob` declarations, and switches to production mode only for `build:prod`. No changes to upstream lockfiles, `skipLibCheck`, `transpileOnly`, or fabricated `.d.ts` stubs. The test suite checks this ordering.
 
-**Evidence:** The failure diagnosis is sourced from the user's b1r1 run logs and official Yarn Classic docs. This corrected b1r2 kit was **statically validated locally**, but its complete Windows compilation, ZIP, installer, and GUI behavior have **not** been rerun or confirmed. Run b1r2 on GitHub Actions to verify.
+**Evidence:** The diagnosis was confirmed from the b1r1 logs and upstream/Yarn source. The subsequent user-run b1r2 workflow **successfully completed GitHub Desktop source compilation**, then failed in the separate C++ launcher compiler (corrected in b1r3). GUI operation, ZIP, installer and portability remain unverified.
 
 ## What it does
 

@@ -7,8 +7,8 @@
 | Shared Package Builder v1.0.0 interface and behavior | SOURCE-INSPECTED | Exact tag `action.yml`, `build.ps1`, `common.ps1`, NSIS source |
 | Shared Publisher v1.1.1 interface and release collision protection | SOURCE-INSPECTED | Exact `action.yml`, `publish.py` and release page |
 | Offline Python source patch, workflow string and ZIP-negative tests | STATIC-VALIDATED if local unit suite succeeds | `python -m unittest discover -s tests -v` output |
-| GitHub-hosted Windows source compilation and native dependency installation | NOT YET VERIFIED | Requires actual GitHub Actions run |
-| Actual Win64 C++ root launcher compilation | NOT YET VERIFIED | Requires Windows MSVC runner |
+| GitHub-hosted Windows source compilation and native dependency installation | WINDOWS-COMPILED (b1r2 user-run) | Logs `logs_117102594875.zip`: successful Yarn install and Electron packager output |
+| Actual Win64 C++ root launcher compilation | FAILED/BLOCKED (b1r2); NOT YET VERIFIED (b1r3) | b1r2 logs show CMD quoting error; b1r3 uses Developer PowerShell but has not been built yet |
 | Actual GitHub Desktop app launched from root launcher | NOT YET VERIFIED | Requires interactive Windows GUI test |
 | Electron profile, Chromium and Git global data containment | NOT YET VERIFIED | Requires runtime file-system monitoring |
 | Host credential-store isolation / authentication persistence | NOT YET VERIFIED; known risk | keytar/GCM behavior may be host-bound |
@@ -27,7 +27,10 @@
 - **SOURCE-INSPECTED:** Upstream 3.6.10 root `package.json` declares `@types/glob` in `devDependencies`, used by `script/post-install.ts`.
 - **SOURCE-INSPECTED:** Yarn Classic ignores `devDependencies` when `NODE_ENV=production` unless overridden.
 - **STATIC-VALIDATED (b1r2 only):** Dependency install now uses development env plus `--production=false` before switching to production build; regression tests enforce this order.
-- **NOT YET VERIFIED (b1r2):** A full Windows source compilation and subsequent packaging run.
+- **WINDOWS-COMPILED (b1r2 user-run):** Upstream GitHub Desktop source build generated `work/source/dist/GitHubDesktop-win32-x64` with exit code 0. This does not demonstrate launch or portability.
+- **FAILED/BLOCKED (b1r2 user-run):** Separate C++ launcher compilation failed before `cl.exe` due to nested CMD quoting and Visual Studio paths with spaces.
+- **STATIC-VALIDATED (b1r3):** Launcher compilation now calls supported Visual Studio Developer PowerShell and MSVC directly without temporary batch/cmd quoting; regression tests assert this design.
+- **NOT YET VERIFIED (b1r3):** Real MSVC launcher output, PortableApps ZIP and installer, interactive runtime.
 
 The kit ZIP itself is a *source builder kit*, not a compiled PortableApps application. Static tests do not prove Windows runtime safety, and an Actions build success will still not prove GUI/OS integration.
 
