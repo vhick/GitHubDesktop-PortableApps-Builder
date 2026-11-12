@@ -1,0 +1,125 @@
+name: Repackage validated GitHub Desktop ZIP (installer only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_release_tag:
+        description: 'Exact existing release tag in THIS builder repo that contains validated ZIP and SHA256SUMS.txt'
+        required: true
+        type: string
+      source_zip_filename:
+        description: 'Exact GitHubDesktopPortable_...zip file name from that release'
+        required: true
+        type: string
+      installer_revision:
+        description: 'Independent installer/package revision, r1 / r2 / ...'
+        required: true
+        default: r1
+        type: string
+      publish:
+        description: 'Publish original verified ZIP + new installer'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+concurrency:
+  group: ghdesktop-repackage-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  repackage:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+    steps:
+      - name: Checkout builder only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download validated previous release ZIP + checksums from calling repo
+        id: source
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.source_release_tag }}
+          ZIP_FILENAME: ${{ inputs.source_zip_filename }}
+          REVISION: ${{ inputs.installer_revision }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^portable-ghdesktop-[A-Za-z0-9_.-]+$') { throw 'Unsafe source tag' }
+          if ($env:ZIP_FILENAME -notmatch '^GitHubDesktopPortable_\d+\.\d+\.\d+_x64_r\d+\.zip$') { throw 'Unsafe ZIP filename' }
+          if ($env:REVISION -notmatch '^r[1-9]\d{0,3}$') { throw 'Bad installer revision' }
+          New-Item -ItemType Directory -Path work/download -Force | Out-Null
+          & gh release download "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" --pattern "$env:ZIP_FILENAME" --pattern SHA256SUMS.txt --dir work/download
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to download both source ZIP and publisher checksum' }
+          if (!(Test-Path -LiteralPath "work/download/$env:ZIP_FILENAME") -or !(Test-Path work/download/SHA256SUMS.txt)) { throw 'Release does not include expected ZIP and SHA256SUMS.txt' }
+          $outputTag = "$env:RELEASE_TAG-installer-$env:REVISION"
+          "output_tag=$outputTag" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Verify full published SHA256 + ZIP layout, extract into PortableApps staging
+        shell: pwsh
+        env:
+          ZIP_FILENAME: ${{ inputs.source_zip_filename }}
+        run: |
+          python scripts/prepare_repackage.py --zip "work/download/$env:ZIP_FILENAME" `
+            --checksums work/download/SHA256SUMS.txt --destination work --output dist
+          if ($LASTEXITCODE -ne 0) { throw 'Previously released ZIP failed verification' }
+
+      - name: Generate installer using pinned shared package builder, no source recompilation
+        id: installer
+        continue-on-error: true
+        uses: vhick/Portable-Package-Builder@0112c35580e83b37eb8757ebcb949274e1631a04 # v1.0.0
+        with:
+          source-dir: work/GitHubDesktopPortable
+          output-dir: dist
+          engine: custom-nsis
+          running-exe: App\GitHubDesktop\GitHubDesktop.exe
+          package-revision: ${{ inputs.installer_revision }}
+          timeout-seconds: '1200'
+
+      - name: Independently validate new installer
+        id: validation
+        continue-on-error: true
+        if: steps.installer.outcome == 'success'
+        shell: pwsh
+        env:
+          INSTALLER_PATH: ${{ steps.installer.outputs.installer-file }}
+          INSTALLER_SHA256: ${{ steps.installer.outputs.installer-sha256 }}
+        run: |
+          & ./scripts/validate_installer.ps1 -Installer $env:INSTALLER_PATH -ExpectedSha $env:INSTALLER_SHA256
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Independent installer validation failed' }
+
+      - name: Universal Publisher dry-run (both assets)
+        if: steps.installer.outcome == 'success' && steps.validation.outcome == 'success'
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: ${{ steps.source.outputs.output_tag }}
+          release-title: 'GitHub Desktop Portable installer-only repack of verified ZIP'
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+
+      - name: Publish original verified ZIP with freshly generated installer
+        if: inputs.publish && steps.installer.outcome == 'success' && steps.validation.outcome == 'success'
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: ${{ steps.source.outputs.output_tag }}
+          release-title: 'GitHub Desktop Portable installer-only repack of verified ZIP'
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+
+      - name: Mark installer failure as failure, source ZIP is still unchanged
+        if: steps.installer.outcome == 'failure' || steps.validation.outcome == 'failure'
+        shell: pwsh
+        run: throw 'Installer generation/validation failed. Original published ZIP was not modified.'

@@ -1,0 +1,221 @@
+name: Build GitHub Desktop PortableApps (source-built x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_version:
+        description: 'latest suitable = currently audited 3.6.10; explicit stable X.Y.Z permitted if adapted'
+        required: true
+        default: latest
+        type: string
+      package_revision:
+        description: 'Package revision r1, r2, etc. Increase after launcher/patch changes'
+        required: true
+        default: r1
+        type: string
+      publish:
+        description: 'Publish validated ZIP and PortableApps-style installer'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ghdesktop-portable-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  source-build-and-package:
+    runs-on: windows-2022
+    timeout-minutes: 115
+    permissions:
+      contents: write
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout independent builder repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate kit self-tests before downloading upstream
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Kit self-tests failed' }
+
+      - name: Choose latest source-audited stable GitHub Desktop version
+        id: release
+        shell: pwsh
+        env:
+          TARGET_VERSION: ${{ inputs.upstream_version }}
+        run: |
+          python scripts/resolve_release.py --version "$env:TARGET_VERSION" --adapter-max 3.6.10 --output work/resolved.json
+          if ($LASTEXITCODE -ne 0) { throw 'Release resolution failed' }
+          $r = Get-Content work/resolved.json -Raw | ConvertFrom-Json
+          "tag=$($r.tag)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$($r.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Fetch exact upstream stable release tag and record provenance
+        shell: pwsh
+        env:
+          SOURCE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          & ./scripts/get_source.ps1 -Tag $env:SOURCE_TAG
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Fetch failed' }
+
+      - name: Compute immutable source-build release identity
+        id: identity
+        shell: pwsh
+        env:
+          PACKAGE_REVISION: ${{ inputs.package_revision }}
+        run: |
+          if ($env:PACKAGE_REVISION -notmatch '^r[1-9][0-9]{0,3}$') { throw 'Bad package revision' }
+          $src = Get-Content work/source-identity.json -Raw | ConvertFrom-Json
+          $upstreamShort = $src.commit.Substring(0,8)
+          $builderShort = "$env:GITHUB_SHA".Substring(0,8)
+          $ver = '${{ steps.release.outputs.version }}'
+          $tag = "portable-ghdesktop-v$ver-g$upstreamShort-b$builderShort-$env:PACKAGE_REVISION"
+          "release_tag=$tag" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "release_title=GitHub Desktop Portable $ver ($env:PACKAGE_REVISION)" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Unambiguous release identity: $tag"
+
+      - name: Avoid redundant finished builds without overwriting existing releases
+        id: already
+        shell: pwsh
+        env:
+          TARGET_TAG: ${{ steps.identity.outputs.release_tag }}
+        run: |
+          python scripts/check_existing_release.py --tag "$env:TARGET_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release collision or API failure' }
+
+      - name: Install matching upstream Node.js toolchain
+        if: steps.already.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: work/source/.node-version
+          cache: yarn
+          cache-dependency-path: work/source/yarn.lock
+
+      - name: Prepare exact fail-closed GitHub Desktop source changes
+        if: steps.already.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          python scripts/patch_source.py --source work/source --patches patches --output work/source-patch-manifest.json
+          if ($LASTEXITCODE -ne 0) { throw 'Source patch adapter failed on upstream drift' }
+
+      - name: Build actual modified GitHub Desktop application from source
+        if: steps.already.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          & ./scripts/build_source.ps1
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Application source compilation failed' }
+
+      - name: Compile real C++17 Win64 root launcher
+        if: steps.already.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          & ./scripts/compile_launcher.ps1
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Launcher compile failed' }
+
+      - name: Install image decoder for legally sourced vendor icon
+        if: steps.already.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check Pillow==11.3.0
+          if ($LASTEXITCODE -ne 0) { throw 'Pillow installation failed' }
+
+      - name: Stage, ZIP, checksum, and independently validate PortableApps package
+        if: steps.already.outputs.skip != 'true'
+        id: zip
+        shell: pwsh
+        env:
+          PACKAGE_REVISION: ${{ inputs.package_revision }}
+        run: |
+          python scripts/stage.py --source work/source --launcher work/bin/GitHubDesktopPortable.exe `
+            --identity work/source-identity.json --patch-manifest work/source-patch-manifest.json `
+            --revision $env:PACKAGE_REVISION --builder-sha "$env:GITHUB_SHA" `
+            --workspace work --output dist --github-output "$env:GITHUB_OUTPUT"
+          if ($LASTEXITCODE -ne 0) { throw 'PortableApps ZIP validation failed' }
+
+      - name: Shared PortableApps-style installer (custom-nsis only)
+        id: installer
+        if: steps.already.outputs.skip != 'true' && steps.zip.outcome == 'success'
+        continue-on-error: true
+        uses: vhick/Portable-Package-Builder@0112c35580e83b37eb8757ebcb949274e1631a04 # v1.0.0 immutable
+        with:
+          source-dir: work/GitHubDesktopPortable
+          output-dir: dist
+          engine: custom-nsis
+          running-exe: App\GitHubDesktop\GitHubDesktop.exe
+          timeout-seconds: '1200'
+          package-revision: ${{ inputs.package_revision }}
+
+      - name: Independently check finished installer PE, archive, and checksum
+        id: installer_validation
+        if: steps.already.outputs.skip != 'true' && steps.installer.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          INSTALLER_PATH: ${{ steps.installer.outputs.installer-file }}
+          INSTALLER_SHA256: ${{ steps.installer.outputs.installer-sha256 }}
+        run: |
+          & ./scripts/validate_installer.ps1 -Installer $env:INSTALLER_PATH -ExpectedSha $env:INSTALLER_SHA256
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'Independent installer validation failed' }
+
+      - name: Dry-run validated ZIP and installer publication first
+        if: steps.already.outputs.skip != 'true' && steps.installer.outcome == 'success' && steps.installer_validation.outcome == 'success'
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1 immutable
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: ${{ steps.identity.outputs.release_tag }}
+          release-title: ${{ steps.identity.outputs.release_title }}
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+
+      - name: Publish fully validated ZIP + installer through sole shared publisher
+        if: inputs.publish && steps.already.outputs.skip != 'true' && steps.installer.outcome == 'success' && steps.installer_validation.outcome == 'success'
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb # v1.1.1 immutable
+        with:
+          files: 'dist/*.zip;dist/*.paf.exe'
+          tag: ${{ steps.identity.outputs.release_tag }}
+          release-title: ${{ steps.identity.outputs.release_title }}
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+
+      - name: ZIP-only publisher dry run after installer failure (do not claim installer succeeded)
+        if: inputs.publish && steps.already.outputs.skip != 'true' && steps.zip.outcome == 'success' && (steps.installer.outcome == 'failure' || steps.installer_validation.outcome == 'failure')
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb
+        with:
+          files: 'dist/*.zip'
+          tag: ${{ steps.identity.outputs.release_tag }}-ziponly
+          release-title: 'GitHub Desktop Portable ZIP only (installer FAILED)'
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'true'
+
+      - name: Preserve validated ZIP in separate clearly marked ZIP-only release
+        if: inputs.publish && steps.already.outputs.skip != 'true' && steps.zip.outcome == 'success' && (steps.installer.outcome == 'failure' || steps.installer_validation.outcome == 'failure')
+        uses: vhick/portable-release-publisher@cb64f86ac2d8c67506db5832de07f9ff58cbeaeb
+        with:
+          files: 'dist/*.zip'
+          tag: ${{ steps.identity.outputs.release_tag }}-ziponly
+          release-title: 'GitHub Desktop Portable ZIP only (installer FAILED)'
+          tag-prefix: 'portable-ghdesktop-'
+          keep-releases: '3'
+          prune: 'false'
+          dry-run: 'false'
+
+      - name: Fail job clearly if installer build or validation failed
+        if: steps.already.outputs.skip != 'true' && steps.zip.outcome == 'success' && (steps.installer.outcome == 'failure' || steps.installer_validation.outcome == 'failure')
+        shell: pwsh
+        run: throw 'PortableApps ZIP validated, but installer failed. Inspect the separate ZIP-only release if publish was selected.'
