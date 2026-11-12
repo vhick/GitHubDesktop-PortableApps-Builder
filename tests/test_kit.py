@@ -55,6 +55,25 @@ class SafeAdapters(unittest.TestCase):
         self.assertNotIn('engine: official', text)
         self.assertIn('steps.installer.outcome', text)
 
+    def test_b1r2_yarn_installs_dev_types_before_production_build(self):
+        # Regression for submitted b1r1 Windows CI logs (TS7016 + TS7006).
+        # Yarn Classic skips devDependencies with NODE_ENV=production.
+        script=(ROOT/'scripts/build_source.ps1').read_text(encoding='utf-8')
+        dev_env = script.index("$env:NODE_ENV = 'development'")
+        install = script.index('install --frozen-lockfile --non-interactive --production=false')
+        verify = script.index("node_modules/@types/glob/index.d.ts")
+        production_env = script.index("$env:NODE_ENV = 'production'")
+        build = script.index('build:prod', production_env)
+        self.assertTrue(dev_env < install < verify < production_env < build)
+        self.assertIn("Missing root @types/glob despite full Yarn install", script)
+        self.assertNotIn('transpileOnly', script)
+        self.assertNotIn('skipLibCheck', script)
+
+    def test_b1r2_fresh_build_revision(self):
+        workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
+        self.assertIn('default: r2', workflow)
+        self.assertIn('scripts/build_source.ps1', workflow)
+
     def test_launcher_has_no_broad_delete(self):
         text=(ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')
         self.assertIn('GetModuleFileNameW', text)

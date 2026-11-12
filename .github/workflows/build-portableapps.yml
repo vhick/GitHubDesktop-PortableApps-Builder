@@ -11,7 +11,7 @@ on:
       package_revision:
         description: 'Package revision r1, r2, etc. Increase after launcher/patch changes'
         required: true
-        default: r1
+        default: r2
         type: string
       publish:
         description: 'Publish validated ZIP and PortableApps-style installer'

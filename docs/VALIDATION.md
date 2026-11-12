@@ -21,6 +21,14 @@
 | Interactive installer upgrade, rollback, relocation | NOT YET VERIFIED | Manual Windows checklist |
 | Publisher dry run and final release publication | NOT YET VERIFIED | Workflow invokes pinned publisher; no GitHub Release created |
 
+## Observed failed b1r1 build and b1r2 remedy
+
+- **FAILED/BLOCKED (b1r1 user-run, 2026-11-12):** `yarn install` postinstall TypeScript TS7016 cannot find `glob` declarations, plus TS7006 in callback parameters. No GitHub Desktop EXE/ZIP/installer was produced.
+- **SOURCE-INSPECTED:** Upstream 3.6.10 root `package.json` declares `@types/glob` in `devDependencies`, used by `script/post-install.ts`.
+- **SOURCE-INSPECTED:** Yarn Classic ignores `devDependencies` when `NODE_ENV=production` unless overridden.
+- **STATIC-VALIDATED (b1r2 only):** Dependency install now uses development env plus `--production=false` before switching to production build; regression tests enforce this order.
+- **NOT YET VERIFIED (b1r2):** A full Windows source compilation and subsequent packaging run.
+
 The kit ZIP itself is a *source builder kit*, not a compiled PortableApps application. Static tests do not prove Windows runtime safety, and an Actions build success will still not prove GUI/OS integration.
 
 ## Potential failure causes worth investigating first

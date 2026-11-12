@@ -1,4 +1,4 @@
-# GitHub Desktop PortableApps Builder Kit — b1r1 (experimental)
+# GitHub Desktop PortableApps Builder Kit — b1r2 (experimental)
 
 **Selected mode:** PORTABLEAPPS only. **Target architecture:** Windows x64.
 
@@ -13,12 +13,18 @@ This kit is **not** an official GitHub Desktop portable distribution. No package
 3. Extract this kit ZIP **into that repository's root**. Ensure `.github/workflows/build-portableapps.yml` exists; on Windows, hidden dot folders may not be visible unless hidden files are shown.
 4. In GitHub Desktop, verify all added files, enter a commit message, choose **Commit to main**, and **Push origin**. No `git init` and no local compiler are required.
 5. In the browser, open the new repository → **Actions** → **Build GitHub Desktop PortableApps (source-built x64)** → **Run workflow**.
-6. Leave `upstream_version=latest` and `package_revision=r1`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
+6. Leave `upstream_version=latest` and `package_revision=r2`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
 7. Inspect the Actions job logs. It downloads source/submodules and compiles the real Electron Windows app; successful compilation alone does **not** mean portability is verified.
-8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r1.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
+8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r2.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
 9. Extract the ZIP to a regular folder or USB drive, or run the independent PortableApps-style installer. In the PortableApps Platform, refresh the app menu. Start `GitHubDesktopPortable.exe` **in the package root**.
 10. Your retained profile and Git global config are under `GitHubDesktopPortable/Data/`. To upgrade, close GitHub Desktop, **back up Data**, replace `App/`, `Other/` and the root launcher while preserving `Data/` unchanged; or select the **same existing portable folder** in the installer. Never merge installed `%APPDATA%` profiles automatically.
 11. Rollback: fully exit the app, back up `Data`, restore old `App`, `Other`, and launcher together. A newer profile/database schema may not work with an older app; never discard the newer Data backup.
+
+## b1r2 — correction for submitted b1r1 GitHub Actions logs
+
+The b1r1 run failed at `source-build-and-package / 10_Build actual modified GitHub Desktop application from source` while executing upstream `script/post-install.ts`. Errors TS7016 and TS7006 for `glob` arose because b1r1 set `NODE_ENV=production` **before** Yarn Classic installed dependencies, unintentionally excluding upstream `devDependencies` (`@types/glob`). This kit sets `NODE_ENV=development` while installing, passes explicit `--production=false` to root Yarn, verifies the real `@types/glob` declarations, and switches to production mode only for `build:prod`. No changes to upstream lockfiles, `skipLibCheck`, `transpileOnly`, or fabricated `.d.ts` stubs. The test suite checks this ordering.
+
+**Evidence:** The failure diagnosis is sourced from the user's b1r1 run logs and official Yarn Classic docs. This corrected b1r2 kit was **statically validated locally**, but its complete Windows compilation, ZIP, installer, and GUI behavior have **not** been rerun or confirmed. Run b1r2 on GitHub Actions to verify.
 
 ## What it does
 
@@ -55,7 +61,7 @@ If a source-built ZIP was already published but its installer failed, open **Act
 - `scripts/resolve_release.py`: GitHub REST API stable resolver, correct numeric version sorting and explicit 404 handling.
 - `scripts/get_source.ps1`: pinned upstream Git source checkout and lockfile provenance record.
 - `scripts/patch_source.py`, `patches/portable-bootstrap.ts`: fail-closed source modification and audit manifest.
-- `scripts/build_source.ps1`: upstream vendored Yarn `install --frozen-lockfile`, then `build:prod` with community signing disabled.
+- `scripts/build_source.ps1`: upstream vendored Yarn `install --frozen-lockfile --production=false` with `NODE_ENV=development` (including upstream nested app install), verify `@types/glob`, then `NODE_ENV=production` for `build:prod` with community signing disabled.
 - `scripts/compile_launcher.ps1`, `launcher/GitHubDesktopPortable.cpp`: actual C++17 compiler blueprint for root PE.
 - `scripts/stage.py`: source-built application, icon, data layout, PortableApps metadata, ZIP verification and SHA256 build manifest.
 - `scripts/validate_installer.ps1`: independently check installer PE/archive/hash after the shared builder.
