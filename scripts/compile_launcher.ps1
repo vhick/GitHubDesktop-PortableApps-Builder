@@ -82,3 +82,19 @@ if ($fixtureLink -ne 0) { throw "Auth registry fixture linking failed: $fixtureL
 $fixtureExit = $LASTEXITCODE
 if ($fixtureExit -ne 0) { throw "Headless auth protocol fixture failed: $fixtureExit" }
 Write-Host 'AUTOMATED-RUNTIME-TESTED (Windows, isolated HKCU fixture): auth ownership and restoration'
+
+# b1r5 regression: exercise actual Windows Job Object process accounting with
+# a self-contained short-lived child/grandchild, not a GUI or a fake mock.
+$lifecycleFixture = Join-Path $outDir 'process-lifecycle-fixture.exe'
+$lifecycleSource = (Resolve-Path -LiteralPath 'tests/process_lifecycle_fixture.cpp').Path
+$lifecycleObj = Join-Path $outDir 'process_lifecycle_fixture.obj'
+& $cl.Source /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /c "/Fo:$lifecycleObj" '/Ilauncher' $lifecycleSource
+$lifecycleCompileExit = $LASTEXITCODE
+if ($lifecycleCompileExit -ne 0) { throw "MSVC lifecycle fixture compilation failed: $lifecycleCompileExit" }
+& $cl.Source /nologo "/Fe:$lifecycleFixture" $lifecycleObj /link /SUBSYSTEM:CONSOLE
+$lifecycleLinkExit = $LASTEXITCODE
+if ($lifecycleLinkExit -ne 0) { throw "MSVC lifecycle fixture linking failed: $lifecycleLinkExit" }
+& $lifecycleFixture
+$lifecycleExit = $LASTEXITCODE
+if ($lifecycleExit -ne 0) { throw "Windows child/grandchild job lifecycle fixture failed: $lifecycleExit" }
+Write-Host 'AUTOMATED-RUNTIME-TESTED (Windows, isolated job fixture): child/grandchild tracking and clean shutdown'

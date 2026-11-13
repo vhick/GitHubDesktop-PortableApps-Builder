@@ -11,13 +11,21 @@ Use a disposable Windows test account/VM before testing with real repositories. 
 - [ ] Edit preferences, close app completely, restart and confirm persistence.
 - [ ] Inspect `Data/Profile` logs, databases, settings, Chromium session storage and `Data/GitHome` git config.
 - [ ] Inspect Windows installed `%APPDATA%\GitHub Desktop` and `%LOCALAPPDATA%\GitHubDesktop` before/during/after. Any unexpected changes must be attributed.
-- [ ] Check whether GitHub login via browser works. If callback fails, **FAIL sign-in**; do not alter registered URL handlers without consent.
+- [ ] Before first launch, snapshot `HKCU\Software\Classes\x-github-desktop-auth` without saving any OAuth URLs/tokens in screenshots or logs.
+- [ ] Launch b1r5, choose **YES** in the explicit temporary handler permission prompt, and check registry command points to this portable root `GitHubDesktopPortable.exe --protocol-launcher "%1"`.
+- [ ] Sign in via browser; confirm Windows prompts to open GitHub Desktop Portable, auth returns to the running app and account becomes signed in. If it does not, **FAIL sign-in** rather than manually exporting credentials.
+- [ ] Exit the portable app and all descendants; verify the original handler exactly matches the prelaunch values (or new key removed when absent).
+- [ ] Choose NO via `Other/Source/Configure-Browser-SignIn.cmd`; verify no auth registry modification, even after repeated starts.
+- [ ] Kill the primary launcher during temporary registration in disposable VM; relaunch and verify journal-based restoration and no installed-app data loss.
+- [ ] While portable is running, allow an independent test app to modify the auth handler; verify portable preserves the newer value on shutdown and retains conflict journal for manual review.
+- [ ] Test ZIP folder/USB relocation with a stale recovery journal; verify old handler is restored only if its owned command is still present.
+- [ ] Verify non-elevated browser and portable app, or document failure if privilege mismatch. Windows UserChoice may block protocol handling.
 - [ ] Check Git credential entries, reauthentication on second machine, Git Credential Manager, SSH key path and credential-protection policy. Do not export saved secrets.
 
 ## Windows shell coexistence
 
 - [ ] Install standard GitHub Desktop in a disposable account; establish existing URL protocol handlers and shortcuts.
-- [ ] Run portable version; verify registered `x-github-client`, `x-github-desktop-auth` and `github-windows` handlers are unchanged.
+- [ ] Run portable version with opt-in: `x-github-client` and `github-windows` remain unchanged, while `x-github-desktop-auth` is temporarily owned and safely restored after exit.
 - [ ] Verify installed desktop profile remains unchanged when the portable version runs.
 - [ ] Confirm updater never replaces the installed application or writes under Squirrel version path.
 - [ ] Test toast shown, click-to-open and focus. Mark notifications as failed if click activation is missing; no false PASS.
@@ -25,7 +33,12 @@ Use a disposable Windows test account/VM before testing with real repositories. 
 
 ## Process and safety
 
-- [ ] Launcher exit, app close, duplicate instance, child Git processes, external editor, background fetch, crash and forced kill. Ensure no launcher hung indefinitely.
+- [ ] From a b1r4 build with an orphaned root launcher, end only that verified portable launcher, **retain** the b1r4 TraceGuard journal, and launch b1r5; confirm conditional recovery and fresh auth registration without overwriting changed host associations.
+- [ ] While the application is running, launch the same root EXE a second time; confirm the second ordinary process exits after a duplicate warning rather than starting an untracked app.
+- [ ] After real OAuth, check `AUTH HANDLER ACTIVE` then `CALLBACK INVOKED` in the token-free status file; do not copy the browser callback URL into any report.
+- [ ] Close the GUI and observe `CLEAN EXIT` and restoration of prior `x-github-desktop-auth` handler; `GitHubDesktopPortable.exe` should no longer appear in Task Manager unless application descendants legitimately remain.
+
+- [ ] Launcher exit, app close, duplicate instance, child Git processes, external editor, background fetch, crash and forced kill. Verify only our launcher remains during the GUI session and exits shortly after the last app child process closes; no indefinite job wait.
 - [ ] Kill launcher/app mid-operation; reopen. No broad TraceGuard recovery is present or claimed.
 - [ ] Place completely empty directories and nested empty trees under `Data`; check they survive ZIP extraction and installer upgrade.
 - [ ] Put a sentinel file in a pre-existing installed `AppData` profile; never modify/delete it with portable startup.

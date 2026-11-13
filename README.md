@@ -1,10 +1,24 @@
-# GitHub Desktop PortableApps Builder Kit — b1r4 (experimental)
+# GitHub Desktop PortableApps Builder Kit — b1r5 (experimental)
 
 **Selected mode:** PORTABLEAPPS only. **Target architecture:** Windows x64.
 
 This independent repository builds **GitHub Desktop from the exact stable upstream tag** (currently source-audited `release-3.6.10`), adds an early in-process Electron profile redirection, compiles a genuine Win64 root launcher, stages a PortableApps-compatible package, independently validates a ZIP, invokes the pinned shared custom-NSIS installer action, then publishes using the pinned Universal Release Publisher.
 
 This kit is **not** an official GitHub Desktop portable distribution. No packaged Windows executable, Windows GUI test, or published release was produced during authoring of this kit. It has **not yet been proven fully portable**. It is intentionally conservative about credentials, authentication protocol handling, and notifications; see `docs/PORTABILITY-AUDIT.md` and `docs/VALIDATION.md` before relying on it.
+
+## b1r5 correction — browser callback and launcher shutdown (2026-11-13)
+
+**Actual user evidence:** b1r4 launches GitHub Desktop's GUI, but the browser authorization never returns successfully. Task Manager shows `GitHubDesktopPortable.exe` still alive after the GUI closes. The provided `Data/AuthRedirectConsent.txt` contains `enabled`; the TraceGuard status says a second launcher found the authentication mutex already owned. The supplied recovery journal was successfully parsed, showing no prior per-user auth protocol key existed. This does **not** prove what Windows currently has registered.
+
+**Identified code bug:** b1r4 uses `WaitForSingleObject(job, INFINITE)` after the app's process exits. A Windows Job Object is **not** ordinarily signaled merely because its active process count reaches zero. That design can leave a launcher process stuck indefinitely and the temporary callback handler unrecovered. Callback-only launches have the same job wait and can also remain stuck. See Microsoft's Job Objects documentation.
+
+**b1r5 fix:** The **main** launcher now waits for `GitHubDesktop.exe`, then queries Job Object **ActiveProcesses** until the tracked tree empties. Callback-only launches start the same packaged application with their quoted `--protocol-launcher` URL, close handles, and exit promptly without taking the registry mutex. Concurrent **ordinary** launches that cannot acquire the session mutex now stop rather than silently starting an untracked instance. No forced termination is used. If process tracking fails, the guard preserves its recovery journal rather than restoring an uncertain state. An isolated C++ Windows job fixture runs in CI, and token-free status messages identify which stage the callback reached.
+
+**Important upgrade from a stranded b1r4 launcher:** Close the GUI, confirm any remaining `GitHubDesktopPortable.exe` belongs to **this portable folder**, and end only that stranded launcher in Task Manager. **Back up the entire Data directory and do not delete `Data/TraceGuard/AuthProtocolRecovery.bin`.** Replace `App/`, `Other/` and the root launcher from the new r5 package, keeping Data untouched. On first new launch the journal is evaluated, and the prior handler restored only where ownership can be established; then the new session can register its own temporary callback using existing consent. If registry ownership differs, the launcher must leave the conflict and journal for manual review. The sign-in result still needs Windows GUI testing.
+
+**Diagnostic after sign-in attempt:** Open `Data/TraceGuard/AuthProtocolStatus.txt`. `AUTH HANDLER ACTIVE` confirms our registration step succeeded, `CALLBACK INVOKED` means Windows launched our handler (not proof GitHub Desktop accepted it), `CALLBACK SPAWN FAILED` means its child process could not start, and `CLEAN EXIT` means prior handler restoration completed. Do not share OAuth links, codes, tokens, or unredacted app logs. Read `docs/RELEASE-NOTES-b1r5.md` for detailed evidence and acceptance steps.
+
+**Validation:** local tests and kit structure only at authoring time; the new b1r5 Windows PE, job fixture, login flow and installer upgrade are NOT YET VERIFIED. The shared pinned actions and version-limited upstream adapter remain unchanged.
 
 ## b1r4 browser sign-in callback fix (2026-11-13)
 
@@ -33,9 +47,9 @@ b1r3 replaces the brittle batch file with Microsoft's documented Visual Studio `
 3. Extract this kit ZIP **into that repository's root**. Ensure `.github/workflows/build-portableapps.yml` exists; on Windows, hidden dot folders may not be visible unless hidden files are shown.
 4. In GitHub Desktop, verify all added files, enter a commit message, choose **Commit to main**, and **Push origin**. No `git init` and no local compiler are required.
 5. In the browser, open the new repository → **Actions** → **Build GitHub Desktop PortableApps (source-built x64)** → **Run workflow**.
-6. Leave `upstream_version=latest` and `package_revision=r4`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
+6. Leave `upstream_version=latest` and `package_revision=r5`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
 7. Inspect the Actions job logs. It downloads source/submodules and compiles the real Electron Windows app; successful compilation alone does **not** mean portability is verified.
-8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r4.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
+8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r5.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
 9. Extract the ZIP to a regular folder or USB drive, or run the independent PortableApps-style installer. In the PortableApps Platform, refresh the app menu. Start `GitHubDesktopPortable.exe` **in the package root**.
 10. Your retained profile and Git global config are under `GitHubDesktopPortable/Data/`. To upgrade, close GitHub Desktop, **back up Data**, replace `App/`, `Other/` and the root launcher while preserving `Data/` unchanged; or select the **same existing portable folder** in the installer. Never merge installed `%APPDATA%` profiles automatically.
 11. Rollback: fully exit the app, back up `Data`, restore old `App`, `Other`, and launcher together. A newer profile/database schema may not work with an older app; never discard the newer Data backup.
@@ -107,7 +121,7 @@ If a source-built ZIP was already published but its installer failed, open **Act
 
 Builder source is MIT-licensed. GitHub Desktop's upstream source declares MIT, while bundled dependencies/assets can have separate notices. Actual upstream source license is copied into the generated package; inspect dependency licenses and trademark/branding policy before redistribution. This is independent community packaging.
 
-## Browser sign-in acceptance (b1r4)
+## Browser sign-in acceptance (b1r5)
 
 1. Close any normally installed GitHub Desktop; do **not** run either copy as Administrator.
 2. Preserve your existing `GitHubDesktopPortable/Data` directory, and install b1r4 as an app/launcher upgrade (ZIP extraction or installer to same folder).

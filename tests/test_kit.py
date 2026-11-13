@@ -71,7 +71,7 @@ class SafeAdapters(unittest.TestCase):
 
     def test_latest_fresh_build_revision(self):
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r4', workflow)
+        self.assertIn('default: r5', workflow)
         self.assertIn('scripts/build_source.ps1', workflow)
 
     def test_b1r3_launcher_compiler_avoids_nested_windows_cmd_quoting(self):
@@ -96,7 +96,7 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('ReadUInt16() -ne 0x8664',script)
         self.assertIn('user32.lib shell32.lib advapi32.lib',script)
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r4',workflow)
+        self.assertIn('default: r5',workflow)
         self.assertIn('scripts/compile_launcher.ps1',workflow)
 
     def test_launcher_has_no_broad_delete(self):
@@ -162,7 +162,8 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('AuthProtocolRecovery.bin', launcher)
         self.assertIn('--protocol-launcher', launcher)
         self.assertIn('isCallback(args)', launcher)
-        self.assertIn('WaitForSingleObject(job, INFINITE)', launcher)
+        self.assertNotIn('WaitForSingleObject(job, INFINITE)', launcher)
+        self.assertIn('WaitForJobProcessesToExit(job)', launcher)
         self.assertIn('RegSetValueExW', guard)
         self.assertIn('RegDeleteValueW', guard)
         self.assertIn('s.ownedCommand', guard)
@@ -183,6 +184,38 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('regRoot(scheme)', test_src)
         self.assertIn('guard.restore(reason)', test_src)
         self.assertIn('guard.recover(reason)', test_src)
+
+    def test_b1r5_job_wait_and_callback_detach(self):
+        source = (ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')
+        lifecycle = (ROOT/'launcher/ProcessLifecycle.h').read_text(encoding='utf-8')
+        self.assertNotIn('WaitForSingleObject(job, INFINITE)', source)
+        self.assertIn('QueryInformationJobObject(job, JobObjectBasicAccountingInformation', lifecycle)
+        self.assertIn('counts.ActiveProcesses == 0', lifecycle)
+        self.assertIn('GetTickCount64()', lifecycle)
+        self.assertIn('if (callback) {', source)
+        self.assertIn('CALLBACK INVOKED:', source)
+        self.assertIn('AUTH HANDLER ACTIVE:', source)
+        self.assertIn('if (!callback) {', source)
+        self.assertIn('auth->abandonForRecovery()', source)
+        callback_start = source.index('if (callback) {\n      if (!CreateProcessW')
+        callback_end = source.index('\n\n    if (!CreateProcessW', callback_start)
+        callback_code = source[callback_start:callback_end]
+        self.assertIn('CloseHandle(pi.hProcess);', callback_code)
+        self.assertIn('return 0;', callback_code)
+        self.assertNotIn('WaitForSingleObject', callback_code)
+        self.assertNotIn('AssignProcessToJobObject', callback_code)
+        self.assertNotIn('lock.lock()', callback_code)
+
+    def test_b1r5_windows_fixture_and_compiler(self):
+        fixture = (ROOT/'tests/process_lifecycle_fixture.cpp').read_text(encoding='utf-8')
+        compiler = (ROOT/'scripts/compile_launcher.ps1').read_text(encoding='utf-8')
+        self.assertIn('--fixture-grandchild', fixture)
+        self.assertIn('AssignProcessToJobObject(job, p.hProcess)', fixture)
+        self.assertIn('counts.ActiveProcesses >= 1', fixture)
+        self.assertIn('WaitForJobProcessesToExit(job, 50, 10000)', fixture)
+        self.assertIn('tests/process_lifecycle_fixture.cpp', compiler)
+        self.assertIn('& $lifecycleFixture', compiler)
+        self.assertIn('AUTOMATED-RUNTIME-TESTED (Windows, isolated job fixture)', compiler)
 
     def test_b1r4_profile_and_protocol_source_patch_remain_isolated(self):
         patch = (ROOT/'scripts/patch_source.py').read_text(encoding='utf-8')

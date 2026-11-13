@@ -21,6 +21,9 @@ public:
   // Restores existing state only when our exact command is still registered.
   bool restore(std::wstring& reason);
   bool isActive() const noexcept { return active_; }
+  // Only for a launcher that cannot prove descendant shutdown. The journal
+  // remains durable, and the next verified exclusive session can recover it.
+  void abandonForRecovery() noexcept { active_ = false; }
 private:
   std::wstring scheme_;
   std::filesystem::path journal_;

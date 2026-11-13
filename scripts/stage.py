@@ -119,7 +119,11 @@ Start=GitHubDesktopPortable.exe
         'Windows Credential Manager/keytar tokens are NOT confirmed portable or isolated.\n'
         'Notification click activation is NOT guaranteed without separate OS registration.\n'
         'Shell caches, Windows file dialogs, external editors, Git hooks, SSH may touch host.\n'
-        'Do not run simultaneously with the installed app when testing sign-in.\n', encoding='utf-8')
+        'Do not run simultaneously with the installed app when testing sign-in.\n'
+        'b1r5 primary launcher uses Windows Job Object ActiveProcesses rather than waiting on its handle.\n'
+        'Browser callback-only launcher starts the packaged app and exits without waiting indefinitely.\n'
+        'TraceGuard/AuthProtocolStatus.txt records token-free steps: AUTH HANDLER ACTIVE, CALLBACK INVOKED and CLEAN EXIT.\n'
+        'Preserve all Data/TraceGuard recovery files across upgrades, especially when b1r4 left a stranded launcher.\n', encoding='utf-8')
     walk_no_links(root)
     zippath = args.output / f'GitHubDesktopPortable_{ver}_x64_{args.revision}.zip'
     args.output.mkdir(parents=True, exist_ok=True)

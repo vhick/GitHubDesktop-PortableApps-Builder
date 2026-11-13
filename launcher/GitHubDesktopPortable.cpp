@@ -1,5 +1,6 @@
 // Unofficial GitHub Desktop PortableApps launcher. MIT. Windows x64 C++17.
 // Opt-in, reversible browser auth callback: only HKCU\Software\Classes\x-github-desktop-auth.
+// b1r5: callback invocations are one-shot; normal launch waits on actual job accounting.
 // Never modify installed GitHub Desktop's other protocols, shortcuts, or HKLM.
 #define UNICODE
 #define _UNICODE
@@ -12,6 +13,7 @@
 #include <vector>
 #include <stdexcept>
 #include "AuthProtocolGuard.h"
+#include "ProcessLifecycle.h"
 
 namespace fs = std::filesystem;
 static const wchar_t* kConsentFile = L"AuthRedirectConsent.txt";
@@ -157,12 +159,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             if (!auth->enable(outcome)) {
               logStatus(data, L"SIGN-IN UNAVAILABLE: " + outcome);
               notice(L"GitHub Desktop Portable - sign-in callback", outcome.c_str());
+            } else {
+              logStatus(data, L"AUTH HANDLER ACTIVE: temporary per-user browser callback registered.");
             }
+          } else {
+            logStatus(data, L"AUTH HANDLER DISABLED: no Windows protocol override requested.");
           }
         }
       } else {
-        // Another portable instance may own the callback. Do not steal it.
-        logStatus(data, L"Auth callback mutex held by another portable instance; not overwritten.");
+        // A second ordinary launcher cannot safely own/manage the same callback,
+        // nor can it reliably track the already-running app's process tree.
+        logStatus(data, L"Auth callback mutex held by another portable instance; duplicate launch blocked.");
+        notice(L"GitHub Desktop Portable",
+               L"Another GitHub Desktop Portable launcher is already running.\n"
+               L"Use its existing window, or close all portable GitHub Desktop processes "
+               L"before launching a different copy. No protocol changes were made.");
+        return 17;
       }
     }
 
@@ -172,6 +184,22 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     mutableCmd.push_back(L'\0');
     STARTUPINFOW si{}; si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
+    // The browser callback is not a new interactive session. Launch the exact
+    // packaged EXE with a safe, quoted URL argument, then DETACH immediately.
+    // Electron's single-instance handler forwards it to the existing window.
+    // Never hold a job/mutex or wait indefinitely for a callback-only process.
+    if (callback) {
+      if (!CreateProcessW(appExe.c_str(), mutableCmd.data(), nullptr, nullptr, FALSE,
+                          0, nullptr, appDir.c_str(), &si, &pi)) {
+        logStatus(data, L"CALLBACK SPAWN FAILED: packaged application was not started.");
+        return 11;
+      }
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+      logStatus(data, L"CALLBACK INVOKED: OS launched portable handler; application acceptance not yet confirmed.");
+      return 0;
+    }
+
     if (!CreateProcessW(appExe.c_str(), mutableCmd.data(), nullptr, nullptr, FALSE,
                         CREATE_SUSPENDED, nullptr, appDir.c_str(), &si, &pi)) {
       notice(L"GitHub Desktop Portable", L"Failed to start the packaged GitHubDesktop.exe.");
@@ -194,17 +222,43 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return 12;
     }
     CloseHandle(pi.hThread);
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD primaryWait = WaitForSingleObject(pi.hProcess, INFINITE);
+    if (primaryWait != WAIT_OBJECT_0) {
+      CloseHandle(pi.hProcess);
+      if (job) CloseHandle(job);
+      logStatus(data, L"PROCESS TRACKING FAILED: initial app process wait failed; recovery journal preserved.");
+      if (auth) auth->abandonForRecovery();
+      return 18;
+    }
     DWORD exitCode = 1;
     GetExitCodeProcess(pi.hProcess, &exitCode);
     CloseHandle(pi.hProcess);
-    if (assigned) (void)WaitForSingleObject(job, INFINITE);
+
+    // Windows job objects become signaled only in specific end-of-job-limit
+    // scenarios. Waiting directly on a job handle can hang forever even with
+    // ZERO child processes. Use QueryInformationJobObject ActiveProcesses.
+    bool drained = true;
+    if (assigned) drained = WaitForJobProcessesToExit(job);
     if (job) CloseHandle(job);
+    if (!drained) {
+      // Cannot safely establish complete shutdown. Leave the journal and
+      // handler untouched rather than restoring while descendants may live.
+      logStatus(data, L"PROCESS TRACKING FAILED: application child shutdown not confirmed; journal preserved.");
+      notice(L"GitHub Desktop Portable - process tracking",
+             L"Could not confirm full child-process shutdown. The authentication "
+             L"recovery journal was retained. Close all portable GitHub Desktop "
+             L"processes before relaunching; do not delete the journal.");
+      // Guard destructor may restore: disarm below via explicit retain method.
+      if (auth) auth->abandonForRecovery();
+      return 18;
+    }
     if (auth && auth->isActive()) {
       std::wstring outcome;
       if (!auth->restore(outcome)) {
         logStatus(data, L"HOST HANDLER PRESERVED: " + outcome);
         notice(L"GitHub Desktop Portable - handler restoration", outcome.c_str());
+      } else {
+        logStatus(data, L"CLEAN EXIT: previous browser sign-in handler safely restored.");
       }
     }
     return static_cast<int>(exitCode);
