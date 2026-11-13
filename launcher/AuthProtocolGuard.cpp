@@ -186,7 +186,9 @@ void checkUserChoice(const std::wstring& scheme) {
 AuthProtocolGuard::AuthProtocolGuard(std::wstring scheme, std::filesystem::path journal,
                                      std::wstring command)
   : scheme_(std::move(scheme)), journal_(std::move(journal)), command_(std::move(command)) {
-  if (scheme_ != L"x-github-desktop-auth" && scheme_.rfind(L"x-vhick-auth-guard-fixture-", 0) != 0)
+  if (scheme_ != L"x-github-desktop-auth" &&
+      scheme_ != L"x-github-desktop-dev-auth" &&
+      scheme_.rfind(L"x-vhick-auth-guard-fixture-", 0) != 0)
     throw std::runtime_error("auth scheme not allowlisted");
   if (command_.find(L"GitHubDesktopPortable.exe\" --protocol-launcher \"%1\"") == std::wstring::npos)
     throw std::runtime_error("invalid portable launcher registry command");

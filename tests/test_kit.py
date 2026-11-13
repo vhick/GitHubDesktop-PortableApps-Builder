@@ -71,7 +71,7 @@ class SafeAdapters(unittest.TestCase):
 
     def test_latest_fresh_build_revision(self):
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r5', workflow)
+        self.assertIn('default: r6', workflow)
         self.assertIn('scripts/build_source.ps1', workflow)
 
     def test_b1r3_launcher_compiler_avoids_nested_windows_cmd_quoting(self):
@@ -96,7 +96,7 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('ReadUInt16() -ne 0x8664',script)
         self.assertIn('user32.lib shell32.lib advapi32.lib',script)
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r5',workflow)
+        self.assertIn('default: r6',workflow)
         self.assertIn('scripts/compile_launcher.ps1',workflow)
 
     def test_launcher_has_no_broad_delete(self):
@@ -216,6 +216,64 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('tests/process_lifecycle_fixture.cpp', compiler)
         self.assertIn('& $lifecycleFixture', compiler)
         self.assertIn('AUTOMATED-RUNTIME-TESTED (Windows, isolated job fixture)', compiler)
+
+    def test_b1r6_oauth_scheme_matches_upstream_public_dev_client(self):
+        # Upstream release-3.6.10 app/app-info.ts:
+        # __DEV_SECRETS__=isDevBuild || !process.env.DESKTOP_OAUTH_CLIENT_SECRET
+        # => community source build expects x-github-desktop-dev-auth.
+        launcher=(ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')
+        guard=(ROOT/'launcher/AuthProtocolGuard.cpp').read_text(encoding='utf-8')
+        build=(ROOT/'scripts/build_source.ps1').read_text(encoding='utf-8')
+        stage=(ROOT/'scripts/stage.py').read_text(encoding='utf-8')
+        self.assertIn('x-github-desktop-dev-auth://', launcher)
+        self.assertIn('AuthDevProtocolRecovery.bin', launcher)
+        self.assertIn('L"x-github-desktop-dev-auth"', launcher)
+        self.assertIn('L"x-github-desktop-dev-auth"', guard)
+        self.assertIn('DESKTOP_OAUTH_CLIENT_SECRET', build)
+        self.assertIn("This builder requires upstream public development OAuth credentials", build)
+        self.assertIn("if 'x-github-desktop-dev-auth' not in compiled_text:", stage)
+        self.assertIn('Source build OAuth protocol mismatch', stage)
+        # Built callback branch must reject production URL arguments.
+        callback_branch=launcher[launcher.index('static bool isCallback'):launcher.index('struct MutexLock')]
+        self.assertIn('x-github-desktop-dev-auth://', callback_branch)
+        self.assertNotIn('L"x-github-desktop-auth://"', callback_branch)
+
+    def test_b1r6_legacy_and_current_auth_journals_are_separate(self):
+        src=(ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')
+        old=src.index('AuthProtocolGuard legacy(L"x-github-desktop-auth"')
+        recovery=src.index('if (!legacy.recover(legacyRecovery))', old)
+        newer=src.index('L"x-github-desktop-dev-auth", journal', recovery)
+        self.assertLess(old, recovery)
+        self.assertLess(recovery, newer)
+        self.assertIn('AuthProtocolRecovery.bin',src)
+        self.assertIn('AuthDevProtocolRecovery.bin',src)
+        self.assertIn('return 19;',src)
+        self.assertIn('AUTH HANDLER ACTIVE: x-github-desktop-dev-auth',src)
+
+    def test_b1r6_read_only_auth_diagnostic(self):
+        ps=(ROOT/'scripts/diagnose_auth.ps1').read_text(encoding='utf-8')
+        self.assertIn('x-github-desktop-dev-auth', ps)
+        self.assertIn('Registry::HKEY_CLASSES_ROOT',ps)
+        self.assertIn('Current-user command matches this root launcher',ps)
+        self.assertIn('Effective HKCR command matches this root launcher',ps)
+        self.assertIn('Windows UserChoice exists for scheme',ps)
+        self.assertNotIn('Set-ItemProperty',ps)
+        self.assertNotIn('New-ItemProperty',ps)
+        self.assertNotIn('Remove-ItemProperty',ps)
+        self.assertNotIn('RegSetValueExW',ps)
+        stage=(ROOT/'scripts/stage.py').read_text(encoding='utf-8')
+        self.assertIn('Diagnose-Browser-SignIn.cmd',stage)
+        self.assertIn('Diagnose-Browser-SignIn.ps1',stage)
+
+    def test_b1r6_docs_and_workflow_revision(self):
+        workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
+        self.assertIn('default: r6',workflow)
+        self.assertIn('build_source.ps1',workflow)
+        release=(ROOT/'docs/RELEASE-NOTES-b1r6.md').read_text(encoding='utf-8')
+        self.assertIn('__DEV_SECRETS__',release)
+        self.assertIn('x-github-desktop-dev-auth',release)
+        readme=(ROOT/'README.md').read_text(encoding='utf-8')
+        self.assertIn('b1r6 correction',readme)
 
     def test_b1r4_profile_and_protocol_source_patch_remain_isolated(self):
         patch = (ROOT/'scripts/patch_source.py').read_text(encoding='utf-8')

@@ -54,3 +54,9 @@ The kit ZIP itself is a *source builder kit*, not a compiled PortableApps applic
 - **SOURCE-INSPECTED:** b1r4's normal and callback paths wait indefinitely on the job handle, but Windows job objects do not signal on ordinary active-process-zero. b1r5 replaces this with supported job-accounting API and makes callback-only launch one-shot. Duplicate ordinary launches fail closed.
 - **STATIC-VALIDATED (b1r5):** `python -m unittest discover -s tests -v` verifies source invariants and new Windows fixture wiring. This does not execute Win32 code on Linux.
 - **NOT YET VERIFIED (b1r5):** real Windows compilation, isolated child/grandchild job fixture, full callback delivery to Electron, browser OAuth, credential persistence, installer upgrades and publisher.
+
+## b1r6 upstream OAuth identity correction
+
+- **SOURCE-INSPECTED:** `app/app-info.ts` chooses `__DEV_SECRETS__ = true` for this source build with no injected OAuth client secret. The matching `app/src/main-process/main.ts` auth protocol is `x-github-desktop-dev-auth`, contrary to b1r4/b1r5's `x-github-desktop-auth` handler.
+- **STATIC-VALIDATED:** b1r6 guards the compiled webpack main.js against missing dev-auth scheme; its launcher uses independent old/new registry journals and retains the b1r5 lifecycle fixes. Python tests explicitly assert the scheme contract.
+- **NOT YET VERIFIED:** hosted Windows compilation of b1r6, actual browser redirect and token exchange, installer upgrade, registry recovery, installed-app coexistence, publisher.

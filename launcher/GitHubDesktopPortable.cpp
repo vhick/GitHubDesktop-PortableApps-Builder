@@ -1,6 +1,9 @@
 // Unofficial GitHub Desktop PortableApps launcher. MIT. Windows x64 C++17.
-// Opt-in, reversible browser auth callback: only HKCU\Software\Classes\x-github-desktop-auth.
-// b1r5: callback invocations are one-shot; normal launch waits on actual job accounting.
+// Opt-in, reversible browser auth callback: HKCU\Software\Classes\x-github-desktop-dev-auth.
+// Legacy recovery checks the old x-github-desktop-auth key without re-registering it.
+// b1r6: use the upstream development OAuth scheme matching the source build.
+// Recover the legacy b1r4/b1r5 production-scheme journal without overwriting installed apps.
+// Callback invocations are one-shot; normal launch waits on actual job accounting.
 // Never modify installed GitHub Desktop's other protocols, shortcuts, or HKLM.
 #define UNICODE
 #define _UNICODE
@@ -56,7 +59,7 @@ static int askConsent(const fs::path& data, bool forcePrompt) {
   }
   int response = MessageBoxW(nullptr,
     L"GitHub Desktop Portable needs a Windows browser callback for GitHub sign-in.\n\n"
-    L"Enable a TEMPORARY handler for x-github-desktop-auth?\n\n"
+    L"Enable a TEMPORARY handler for x-github-desktop-dev-auth?\n\n"
     L"YES: Back up any existing per-user handler, redirect sign-in to this portable copy "
     L"while it runs, and restore the previous handler on normal exit.\n\n"
     L"NO: Leave the Windows handler unchanged (browser sign-in may not finish).\n\n"
@@ -79,7 +82,7 @@ static bool isCallback(const std::vector<std::wstring>& args) {
   // Windows invokes the registered callback with one URL argument only. Never
   // interpret URL content as independent CLI flags or shell commands.
   return args.size() == 2 &&
-      args[1].rfind(L"x-github-desktop-auth://", 0) == 0 &&
+      args[1].rfind(L"x-github-desktop-dev-auth://", 0) == 0 &&
       args[1].size() < 8192 && args[1].find_first_of(L"\r\n\0", 0, 2) == std::wstring::npos;
 }
 struct MutexLock {
@@ -143,9 +146,25 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     std::unique_ptr<AuthProtocolGuard> auth;
     if (!callback) {
       if (lock.lock()) {
-        const auto journal = data / L"TraceGuard" / L"AuthProtocolRecovery.bin";
         const auto ownerCmd = quote(launcher.wstring()) + L" --protocol-launcher \"%1\"";
-        auth = std::make_unique<AuthProtocolGuard>(L"x-github-desktop-auth", journal, ownerCmd);
+        // Older builders registered the *production* scheme, even though the
+        // source-bundled OAuth client is a development client. Undo that
+        // session-scoped change first, using the journal's ownership proofs.
+        // Do not delete or rewrite this old journal by hand.
+        AuthProtocolGuard legacy(L"x-github-desktop-auth",
+                                 data / L"TraceGuard" / L"AuthProtocolRecovery.bin",
+                                 ownerCmd);
+        std::wstring legacyRecovery;
+        if (!legacy.recover(legacyRecovery)) {
+          logStatus(data, L"LEGACY AUTH RECOVERY CONFLICT: " + legacyRecovery);
+          notice(L"GitHub Desktop Portable - legacy callback recovery", legacyRecovery.c_str());
+          return 19;
+        }
+        // GitHub Desktop app-info.ts defines __DEV_SECRETS__=true for this
+        // public source-built OAuth client. main.ts therefore requires this
+        // DEV callback, not x-github-desktop-auth used by official builds.
+        const auto journal = data / L"TraceGuard" / L"AuthDevProtocolRecovery.bin";
+        auth = std::make_unique<AuthProtocolGuard>(L"x-github-desktop-dev-auth", journal, ownerCmd);
         std::wstring recovery;
         if (!auth->recover(recovery)) {
           logStatus(data, L"RECOVERY CONFLICT: " + recovery);
@@ -160,7 +179,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
               logStatus(data, L"SIGN-IN UNAVAILABLE: " + outcome);
               notice(L"GitHub Desktop Portable - sign-in callback", outcome.c_str());
             } else {
-              logStatus(data, L"AUTH HANDLER ACTIVE: temporary per-user browser callback registered.");
+              logStatus(data, L"AUTH HANDLER ACTIVE: x-github-desktop-dev-auth callback registered.");
             }
           } else {
             logStatus(data, L"AUTH HANDLER DISABLED: no Windows protocol override requested.");
@@ -196,7 +215,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
       }
       CloseHandle(pi.hThread);
       CloseHandle(pi.hProcess);
-      logStatus(data, L"CALLBACK INVOKED: OS launched portable handler; application acceptance not yet confirmed.");
+      logStatus(data, L"CALLBACK INVOKED: DEV auth callback received; application acceptance not yet confirmed.");
       return 0;
     }
 

@@ -8,6 +8,16 @@ try {
   $env:PYTHONIOENCODING = 'utf-8'
   $env:GHD_PORTABLE_SOURCE_BUILD = '1'
   $env:RELEASE_CHANNEL = 'production'
+  # This community source build intentionally uses the PUBLIC upstream development
+  # OAuth client from app/app-info.ts. The upstream source selects the
+  # x-github-desktop-dev-auth:// callback when DESKTOP_OAUTH_CLIENT_SECRET is absent.
+  # Refuse accidental secret injection: it would change the compiled callback and
+  # invalidate this launcher's scheme and registry ownership assumptions.
+  if ($env:DESKTOP_OAUTH_CLIENT_ID -or $env:DESKTOP_OAUTH_CLIENT_SECRET) {
+    throw 'This builder requires upstream public development OAuth credentials. Do not inject DESKTOP_OAUTH_CLIENT_ID/SECRET without a separately audited callback adapter.'
+  }
+  Write-Host 'OAuth build contract: upstream development client => x-github-desktop-dev-auth (no secret values printed)'
+
   # BUILD DEPENDENCIES MUST BE PRESENT BEFORE THE UPSTREAM POSTINSTALL HOOK.
   # GitHub Desktop 3.6.10 declares @types/glob under root devDependencies.
   # Yarn Classic silently omits them if NODE_ENV=production during install.
