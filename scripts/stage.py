@@ -107,9 +107,15 @@ Start=GitHubDesktopPortable.exe
         f'Commit: {identity["commit"]}\nYarn lock SHA256: {identity["yarn_lock_sha256"]}\n'
         f'Builder SHA: {args.builder_sha}\nPackage revision: {args.revision}\n'
         'This is an unsigned, unofficial, source-modified build.\n', encoding='utf-8')
+    (other / 'Configure-Browser-SignIn.cmd').write_text(
+        '@echo off\n"%~dp0..\\..\\GitHubDesktopPortable.exe" --auth-redirect-settings\n',
+        encoding='utf-8', newline='\r\n')
     (other / 'PORTABILITY-LIMITS.txt').write_text(
         'Electron profile is redirected to Data/Profile; global Git config to Data/GitHome.\n'
-        'Browser OAuth URI handlers are intentionally NOT registered; sign-in may be limited.\n'
+        'Browser OAuth temporarily uses HKCU x-github-desktop-auth only after explicit opt-in.\n'
+        'Exact prior command/URL Protocol values saved to Data/TraceGuard/AuthProtocolRecovery.bin, restored after complete exit.\n'
+        'Interrupted recovery is conditional on owned-command match and never overwrites newer host changes.\n'
+        'Changing Windows Default Apps UserChoice, multiple concurrent portable copies, or a different privilege level can block redirects.\n'
         'Windows Credential Manager/keytar tokens are NOT confirmed portable or isolated.\n'
         'Notification click activation is NOT guaranteed without separate OS registration.\n'
         'Shell caches, Windows file dialogs, external editors, Git hooks, SSH may touch host.\n'
@@ -144,7 +150,7 @@ def verify_zip(path: Path, version: str | None = None, pkg_version: str | None =
                   base + 'App/GitHubDesktop/resources/app/main.js', base + 'App/AppInfo/appinfo.ini',
                   base + 'App/AppInfo/appicon.ico', base + 'App/AppInfo/appicon_16.png',
                   base + 'App/AppInfo/appicon_32.png', base + 'Other/Source/source-identity.json',
-                  base + 'Data/TraceGuard/']
+                  base + 'Data/TraceGuard/', base + 'Other/Source/Configure-Browser-SignIn.cmd']
         if set(needed) - names: raise RuntimeError(f'ZIP missing: {sorted(set(needed)-names)}')
         if any(x.startswith('/') or '..' in x.split('/') or '\\' in x for x in names):
             raise RuntimeError('ZIP contains unsafe member names')

@@ -35,11 +35,19 @@ if (Test-Path -LiteralPath $out) { throw "Refusing stale launcher build output: 
 Write-Host "MSVC developer environment: $env:VSCMD_VER"
 Write-Host "Compiler: $($cl.Source)"
 Write-Host "Launcher source: $src"
-# PowerShell passes each argument as a single item, even for paths with spaces.
-# Windows SDK user32.lib is essential for MessageBoxW.
-& $cl.Source /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE "/Fo:$obj" "/Fe:$out" $src /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib
+# Each translation unit needs its OWN object output. /Fo:<file> with multiple
+# source files causes MSVC D8021; compile individually, link after both succeed.
+$guardSource = (Resolve-Path -LiteralPath 'launcher/AuthProtocolGuard.cpp').Path
+$guardObj = Join-Path $outDir 'AuthProtocolGuard.obj'
+& $cl.Source /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /c "/Fo:$obj" $src
+$mainExit = $LASTEXITCODE
+if ($mainExit -ne 0) { throw "MSVC launcher translation unit failed: $mainExit" }
+& $cl.Source /nologo /std:c++17 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /c "/Fo:$guardObj" $guardSource
+$guardExit = $LASTEXITCODE
+if ($guardExit -ne 0) { throw "MSVC auth protocol guard compilation failed: $guardExit" }
+& $cl.Source /nologo "/Fe:$out" $obj $guardObj /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib advapi32.lib
 $exitCode = $LASTEXITCODE
-if ($exitCode -ne 0) { throw "MSVC launcher compilation failed: $exitCode" }
+if ($exitCode -ne 0) { throw "MSVC launcher linking failed: $exitCode" }
 if (!(Test-Path -LiteralPath $out -PathType Leaf)) { throw 'MSVC did not emit GitHubDesktopPortable.exe' }
 
 # Validate actual x64 PE header, not just the filename or MZ signature.
@@ -59,3 +67,18 @@ try {
   $stream.Dispose()
 }
 Write-Host "WINDOWS-COMPILED: Win64 launcher: $out"
+
+# Headless, isolated HKCU protocol fixture; NEVER uses the real auth scheme.
+$fixture = Join-Path $outDir 'auth-guard-fixture.exe'
+$fixtureSource = (Resolve-Path -LiteralPath 'tests/auth_guard_fixture.cpp').Path
+$fixtureObj = Join-Path $outDir 'auth_guard_fixture.obj'
+& $cl.Source /nologo /std:c++17 /EHsc /O2 /W4 /c "/Fo:$fixtureObj" '/Ilauncher' $fixtureSource
+$fixtureCompile = $LASTEXITCODE
+if ($fixtureCompile -ne 0) { throw "Auth registry fixture compilation failed: $fixtureCompile" }
+& $cl.Source /nologo "/Fe:$fixture" $fixtureObj $guardObj /link advapi32.lib user32.lib shell32.lib
+$fixtureLink = $LASTEXITCODE
+if ($fixtureLink -ne 0) { throw "Auth registry fixture linking failed: $fixtureLink" }
+& $fixture
+$fixtureExit = $LASTEXITCODE
+if ($fixtureExit -ne 0) { throw "Headless auth protocol fixture failed: $fixtureExit" }
+Write-Host 'AUTOMATED-RUNTIME-TESTED (Windows, isolated HKCU fixture): auth ownership and restoration'

@@ -71,7 +71,7 @@ class SafeAdapters(unittest.TestCase):
 
     def test_latest_fresh_build_revision(self):
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r3', workflow)
+        self.assertIn('default: r4', workflow)
         self.assertIn('scripts/build_source.ps1', workflow)
 
     def test_b1r3_launcher_compiler_avoids_nested_windows_cmd_quoting(self):
@@ -94,9 +94,9 @@ class SafeAdapters(unittest.TestCase):
         self.assertIn('if ($exitCode -ne 0)',script)
         self.assertIn('ReadUInt32() -ne 0x00004550',script)
         self.assertIn('ReadUInt16() -ne 0x8664',script)
-        self.assertIn('user32.lib shell32.lib',script)
+        self.assertIn('user32.lib shell32.lib advapi32.lib',script)
         workflow=(ROOT/'.github/workflows/build-portableapps.yml').read_text(encoding='utf-8')
-        self.assertIn('default: r3',workflow)
+        self.assertIn('default: r4',workflow)
         self.assertIn('scripts/compile_launcher.ps1',workflow)
 
     def test_launcher_has_no_broad_delete(self):
@@ -151,5 +151,46 @@ class SafeAdapters(unittest.TestCase):
     def test_package_appid_unique(self):
         s=module('stage')
         self.assertEqual(s.APP_ID, 'GitHubDesktopPortableVhick')
+
+
+    def test_b1r4_opt_in_reversible_callback_is_bounded(self):
+        launcher = (ROOT/'launcher/GitHubDesktopPortable.cpp').read_text(encoding='utf-8')
+        guard = (ROOT/'launcher/AuthProtocolGuard.cpp').read_text(encoding='utf-8')
+        self.assertIn('x-github-desktop-auth', launcher)
+        self.assertIn('MB_YESNOCANCEL', launcher)
+        self.assertIn('AuthRedirectConsent.txt', launcher)
+        self.assertIn('AuthProtocolRecovery.bin', launcher)
+        self.assertIn('--protocol-launcher', launcher)
+        self.assertIn('isCallback(args)', launcher)
+        self.assertIn('WaitForSingleObject(job, INFINITE)', launcher)
+        self.assertIn('RegSetValueExW', guard)
+        self.assertIn('RegDeleteValueW', guard)
+        self.assertIn('s.ownedCommand', guard)
+        self.assertIn('MOVEFILE_WRITE_THROUGH', guard)
+        self.assertIn('RegQueryInfoKeyW', guard)
+        self.assertNotIn('HKEY_LOCAL_MACHINE', guard)
+        self.assertNotIn('RegDeleteTree', guard)
+        self.assertNotIn('TerminateProcess(pi.hProcess)', guard)
+
+    def test_b1r4_win_fixture_and_compiler(self):
+        compiler = (ROOT/'scripts/compile_launcher.ps1').read_text(encoding='utf-8')
+        test_src = (ROOT/'tests/auth_guard_fixture.cpp').read_text(encoding='utf-8')
+        self.assertIn('launcher/AuthProtocolGuard.cpp', compiler)
+        self.assertIn('tests/auth_guard_fixture.cpp', compiler)
+        self.assertIn('AUTOMATED-RUNTIME-TESTED', compiler)
+        self.assertIn('x-vhick-auth-guard-fixture-', test_src)
+        self.assertNotIn('x-github-desktop-auth', test_src)
+        self.assertIn('regRoot(scheme)', test_src)
+        self.assertIn('guard.restore(reason)', test_src)
+        self.assertIn('guard.recover(reason)', test_src)
+
+    def test_b1r4_profile_and_protocol_source_patch_remain_isolated(self):
+        patch = (ROOT/'scripts/patch_source.py').read_text(encoding='utf-8')
+        self.assertIn('if (!process.env.GHD_PORTABLE_ROOT)', patch)
+        self.assertIn('possibleProtocols.forEach(protocol => setAsDefaultProtocolClient(protocol))', patch)
+        self.assertIn('setupAutoUpdater()', patch)
+        stage = (ROOT/'scripts/stage.py').read_text(encoding='utf-8')
+        self.assertIn('Configure-Browser-SignIn.cmd', stage)
+        self.assertIn('AuthProtocolRecovery.bin', stage)
 
 if __name__ == '__main__': unittest.main()

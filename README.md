@@ -1,10 +1,24 @@
-# GitHub Desktop PortableApps Builder Kit — b1r3 (experimental)
+# GitHub Desktop PortableApps Builder Kit — b1r4 (experimental)
 
 **Selected mode:** PORTABLEAPPS only. **Target architecture:** Windows x64.
 
 This independent repository builds **GitHub Desktop from the exact stable upstream tag** (currently source-audited `release-3.6.10`), adds an early in-process Electron profile redirection, compiles a genuine Win64 root launcher, stages a PortableApps-compatible package, independently validates a ZIP, invokes the pinned shared custom-NSIS installer action, then publishes using the pinned Universal Release Publisher.
 
 This kit is **not** an official GitHub Desktop portable distribution. No packaged Windows executable, Windows GUI test, or published release was produced during authoring of this kit. It has **not yet been proven fully portable**. It is intentionally conservative about credentials, authentication protocol handling, and notifications; see `docs/PORTABILITY-AUDIT.md` and `docs/VALIDATION.md` before relying on it.
+
+## b1r4 browser sign-in callback fix (2026-11-13)
+
+**Problem reproduced by user:** The b1r3 program launches and opens the browser, but after GitHub authorization the browser never returns to the portable application. The b1r3 source patch explicitly stopped registering all Windows schemes. GitHub Desktop 3.6.10 uses `x-github-desktop-auth://` for OAuth callbacks; without an active Windows handler, authentication cannot finish.
+
+**Fix:** The real root C++ launcher now prompts on first normal launch for permission to manage **one** user-level URL scheme for the session: `HKCU\Software\Classes\x-github-desktop-auth`. The YES choice is recorded as `Data/AuthRedirectConsent.txt` and used on subsequent starts; NO is also remembered. A separate **Other/Source/Configure-Browser-SignIn.cmd** can be used later to change that preference through the compiled launcher, without modifying or executing any arbitrary registry script.
+
+With consent, the launcher preserves the original handler command and `URL Protocol` value (including exact value types/bytes and whether the corresponding keys existed) in a durable `Data/TraceGuard/AuthProtocolRecovery.bin` **before changing the registry**. It points callbacks at the real root `GitHubDesktopPortable.exe --protocol-launcher "%1"`, which forwards them to the packaged application with the portable environment. The source-built application still suppresses broad automatic registration of `x-github-client`, `github-windows` and unrelated schemes.
+
+After complete application/child-process shutdown, the launcher restores the saved handler **only if its own exact command is still the registered command**. It avoids overwriting any registry value another program has changed, removes only newly created empty keys, and retains a recovery journal for a conflicted/interrupted operation. The next launch retries idempotent recovery; a registry conflict blocks a new override. A process mutex prevents two portable copies from registering the callback at the same time. The callback subprocess never modifies the registry or asks again.
+
+**Limitations:** The installed GitHub Desktop will not receive that scheme's sign-in callbacks while the portable session owns it. Running installed/portable concurrently is not advised. Windows UserChoice overrides, mismatched elevation, browser prompts or external handlers may still prevent sign-in; the fix does not guarantee success without real GUI testing. GitHub credential storage and notifications remain separately unverified. No permanent association, elevation, HKLM edit, shell shortcut cleanup or broad registry sweep is used.
+
+**Validation:** 16 local Python static/regression tests pass. b1r4's C++ compile and isolated Windows registry fixture are configured in CI but have NOT run in this environment. Do not call this a runtime-confirmed sign-in fix until the user completes the Windows flow.
 
 ## b1r3 correction (2026-11-12)
 
@@ -19,9 +33,9 @@ b1r3 replaces the brittle batch file with Microsoft's documented Visual Studio `
 3. Extract this kit ZIP **into that repository's root**. Ensure `.github/workflows/build-portableapps.yml` exists; on Windows, hidden dot folders may not be visible unless hidden files are shown.
 4. In GitHub Desktop, verify all added files, enter a commit message, choose **Commit to main**, and **Push origin**. No `git init` and no local compiler are required.
 5. In the browser, open the new repository → **Actions** → **Build GitHub Desktop PortableApps (source-built x64)** → **Run workflow**.
-6. Leave `upstream_version=latest` and `package_revision=r3`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
+6. Leave `upstream_version=latest` and `package_revision=r4`. Keep `publish=true` to create a downloadable release after both ZIP and installer checks. The workflow is manual by default and may consume substantial Windows Actions minutes.
 7. Inspect the Actions job logs. It downloads source/submodules and compiles the real Electron Windows app; successful compilation alone does **not** mean portability is verified.
-8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r3.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
+8. Once the workflow **succeeds**, open the repository's **Releases** page. Download the `GitHubDesktopPortable_..._x64_r4.zip` and its `.paf.exe` installer. The publisher creates `SHA256SUMS.txt` containing the actual SHA-256 for both assets.
 9. Extract the ZIP to a regular folder or USB drive, or run the independent PortableApps-style installer. In the PortableApps Platform, refresh the app menu. Start `GitHubDesktopPortable.exe` **in the package root**.
 10. Your retained profile and Git global config are under `GitHubDesktopPortable/Data/`. To upgrade, close GitHub Desktop, **back up Data**, replace `App/`, `Other/` and the root launcher while preserving `Data/` unchanged; or select the **same existing portable folder** in the installer. Never merge installed `%APPDATA%` profiles automatically.
 11. Rollback: fully exit the app, back up `Data`, restore old `App`, `Other`, and launcher together. A newer profile/database schema may not work with an older app; never discard the newer Data backup.
@@ -38,7 +52,7 @@ The b1r1 run failed at `source-build-and-package / 10_Build actual modified GitH
 - Source adapter: `scripts/patch_source.py` rejects any release except the currently audited `3.6.10`, and rejects missing/duplicated anchors. This is deliberate; no silent compiling of unreviewed future releases.
 - Profile: `patches/portable-bootstrap.ts`, imported before normal main-process imports, sets Electron `userData`, `sessionData`, logs and portable AUMID inside `Data/Profile` **before app startup**.
 - Git: the compiled launcher passes process-local `HOME`, `GIT_CONFIG_GLOBAL`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` under `Data/GitHome` to GitHub Desktop and its descendants, without changing Windows system variables.
-- Shell: the patch prevents automatic URL protocol registration in the portable version; it does **not** modify installed app shortcuts, registry keys, PATH, or the default URL handler.
+- Shell: the source patch suppresses broad automatic URL registration. The **compiled launcher**, only with user consent, temporarily overrides the single `x-github-desktop-auth` user handler, preserving/restoring the previous handler conditionally and journaling crash recovery. It never alters HKLM, installed shortcuts, `x-github-client` or `github-windows`.
 - Updates: the Squirrel updater is disabled in portable mode, because it assumes a normal installed app and could overwrite that installation.
 - Notifications: a separate portable CLSID is chosen to avoid reusing the installed app's Squirrel toast CLSID. Native toast activation still requires separate Windows integration, and click-to-open is not verified.
 - Launcher: MSVC C++17 Win64 PE launches the packaged `GitHubDesktop.exe` with argument forwarding, waits for the application, and attempts to wait for descendants. No remote control, process injection, broad cleanup, or automatic elevation.
@@ -49,7 +63,7 @@ The b1r1 run failed at `source-build-and-package / 10_Build actual modified GitH
 
 ## Major known constraints — READ BEFORE USE
 
-1. **GitHub account sign-in may fail.** The upstream browser OAuth callback uses Windows protocol handlers; this kit does not silently replace the installed app's handlers. Browser callback/credentials and enterprise sign-in remain **NOT YET VERIFIED**. Do not use this package as your sole Git client until those tests pass.
+1. **GitHub browser sign-in is now enabled only with informed permission, but success is NOT YET VERIFIED.** First startup asks whether to enable a temporary per-user `x-github-desktop-auth` callback. Select YES for browser authentication. On clean exit the previous handler is restored; if it changed externally, the launcher protects the newer setting and leaves its recovery journal. This conflicts temporarily with installed GitHub Desktop sign-in, and Windows browser/UserChoice settings may still block callbacks. Do not use this package as your sole Git client until end-to-end tests pass.
 2. **Credential data may remain on the host.** `keytar` / Windows Credential Manager, Git Credential Manager, Windows DPAPI, SSH-agent, Git/SSH credentials, external tools, Git hooks and downloaded repository paths are not proven entirely contained under `Data`. Sign-in on a different computer may require reauthentication. No unsafe plaintext-token migration is included.
 3. **Notifications are not proven fully working.** Windows toast activation/click callbacks typically require OS registration. This package avoids borrowing the installed application's identity, but cannot claim full notification activation portability without an opt-in Windows integration and manual test.
 4. **Do not assume no Windows traces.** Windows shell caches, Recent Items, Jump Lists, file dialogs, Prefetch, notifications, OS credential storage, and external apps may create user-managed or OS-managed state. No broad deletion of those areas is attempted.
@@ -92,3 +106,17 @@ If a source-built ZIP was already published but its installer failed, open **Act
 ### License
 
 Builder source is MIT-licensed. GitHub Desktop's upstream source declares MIT, while bundled dependencies/assets can have separate notices. Actual upstream source license is copied into the generated package; inspect dependency licenses and trademark/branding policy before redistribution. This is independent community packaging.
+
+## Browser sign-in acceptance (b1r4)
+
+1. Close any normally installed GitHub Desktop; do **not** run either copy as Administrator.
+2. Preserve your existing `GitHubDesktopPortable/Data` directory, and install b1r4 as an app/launcher upgrade (ZIP extraction or installer to same folder).
+3. Run **GitHubDesktopPortable.exe** from the root. On the permission dialog select **YES** for the temporary authentication handler. The choice is saved in `Data/AuthRedirectConsent.txt`.
+4. Select **Sign in to GitHub.com**, complete browser authorization, and accept the browser prompt to open the application. Confirm the account becomes visible inside the **portable** GitHub Desktop.
+5. Close the portable app **completely**. The launcher waits for all its job descendants to exit and conditionally restores the previous `HKCU\Software\Classes\x-github-desktop-auth` command. If the previous command was absent, it removes only its own empty keys.
+6. To review or turn off consent later, run `Other\Source\Configure-Browser-SignIn.cmd`. This only invokes the compiled root launcher in settings mode. Select **NO** to stop overriding the protocol on subsequent sessions.
+7. A recovery or conflict message means the launcher has deliberately left an ambiguous registry state unchanged. Do not delete `Data\TraceGuard\AuthProtocolRecovery.bin` or manually force registry replacements. Inspect `Data\TraceGuard\AuthProtocolStatus.txt` and compare handler ownership before resolving the conflict.
+
+For read-only diagnostics in Windows Command Prompt, use `reg query "HKCU\Software\Classes\x-github-desktop-auth\shell\open\command" /ve` before launch, during the session, and after exit. A missing key before and after is fine. During the opted-in session it should point to the **portable root launcher**, not an installed `GitHubDesktop.exe`. Never paste OAuth callback URLs or authorization codes into bug reports.
+
+**If the browser still won't return to the app:** check Windows browser permission, Default Apps protocol associations, any existing installed instance, and whether browser/portable run at different privilege levels. The GitHub team tracks similar Windows problems in upstream issue #22325. Select NO for temporary registration and use the installed desktop client if your system prohibits this URI callback; do not bypass the Windows UserChoice mechanism.
