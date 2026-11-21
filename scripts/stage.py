@@ -44,8 +44,15 @@ def build(args):
     if not icon.is_file(): raise RuntimeError(f'Vendor icon missing: {icon}')
     check_pe(built / 'GitHubDesktop.exe', 0x8664)
     check_pe(launcher, 0x8664)
-    if not (built / 'resources/app/main.js').is_file():
+    compiled_main = built / 'resources/app/main.js'
+    if not compiled_main.is_file():
         raise RuntimeError('Built resources/app/main.js missing; upstream output layout drift')
+    # Source-backed OAuth identity validation: community builds use the public
+    # dev client (app/app-info.ts) and MUST handle the matching dev URL scheme.
+    # Minified webpack main.js still contains the literal protocol string.
+    compiled_text = compiled_main.read_text(encoding='utf-8', errors='strict')
+    if 'x-github-desktop-dev-auth' not in compiled_text:
+        raise RuntimeError('Source build OAuth protocol mismatch: expected x-github-desktop-dev-auth in compiled main.js')
     identity = json.loads(args.identity.read_text(encoding='utf-8-sig'))
     ver = json.loads((source / 'app/package.json').read_text(encoding='utf-8'))['version']
     if identity['tag'] != f'release-{ver}': raise RuntimeError('Identity/tag mismatch')
@@ -107,13 +114,29 @@ Start=GitHubDesktopPortable.exe
         f'Commit: {identity["commit"]}\nYarn lock SHA256: {identity["yarn_lock_sha256"]}\n'
         f'Builder SHA: {args.builder_sha}\nPackage revision: {args.revision}\n'
         'This is an unsigned, unofficial, source-modified build.\n', encoding='utf-8')
+    (other / 'Configure-Browser-SignIn.cmd').write_text(
+        '@echo off\n"%~dp0..\\..\\GitHubDesktopPortable.exe" --auth-redirect-settings\n',
+        encoding='utf-8', newline='\r\n')
+    shutil.copy2(Path(__file__).parent / 'diagnose_auth.ps1', other / 'Diagnose-Browser-SignIn.ps1')
+    (other / 'Diagnose-Browser-SignIn.cmd').write_text(
+        '@echo off\nsetlocal\npowershell.exe -NoProfile -File "%~dp0Diagnose-Browser-SignIn.ps1" -PortableRoot "%~dp0..\\.."\npause\n',
+        encoding='utf-8', newline='\r\n')
     (other / 'PORTABILITY-LIMITS.txt').write_text(
         'Electron profile is redirected to Data/Profile; global Git config to Data/GitHome.\n'
-        'Browser OAuth URI handlers are intentionally NOT registered; sign-in may be limited.\n'
+        'Browser OAuth temporarily uses HKCU x-github-desktop-dev-auth only after explicit opt-in.\n'
+        'This build uses upstream public development OAuth credentials. Do not mix with official prod scheme.\n'
+        'Development handler journal: Data/TraceGuard/AuthDevProtocolRecovery.bin; restored after complete exit.\n'
+        'Legacy b1r4/b1r5 AuthProtocolRecovery.bin for production scheme is carefully recovered before launch.\n'
+        'Interrupted recovery is conditional on owned-command match and never overwrites newer host changes.\n'
+        'Changing Windows Default Apps UserChoice, multiple concurrent portable copies, or a different privilege level can block redirects.\n'
         'Windows Credential Manager/keytar tokens are NOT confirmed portable or isolated.\n'
         'Notification click activation is NOT guaranteed without separate OS registration.\n'
         'Shell caches, Windows file dialogs, external editors, Git hooks, SSH may touch host.\n'
-        'Do not run simultaneously with the installed app when testing sign-in.\n', encoding='utf-8')
+        'Do not run simultaneously with the installed app when testing sign-in.\n'
+        'b1r6 retains the Windows Job Object ActiveProcesses tracking fix from b1r5.\n'
+        'Dev OAuth callback launcher starts the packaged app and exits without waiting indefinitely.\n'
+        'TraceGuard/AuthProtocolStatus.txt records token-free steps: AUTH HANDLER ACTIVE, CALLBACK INVOKED and CLEAN EXIT.\n'
+        'Preserve all Data/TraceGuard files, including both old and new journals, across upgrades.\n', encoding='utf-8')
     walk_no_links(root)
     zippath = args.output / f'GitHubDesktopPortable_{ver}_x64_{args.revision}.zip'
     args.output.mkdir(parents=True, exist_ok=True)
@@ -144,7 +167,9 @@ def verify_zip(path: Path, version: str | None = None, pkg_version: str | None =
                   base + 'App/GitHubDesktop/resources/app/main.js', base + 'App/AppInfo/appinfo.ini',
                   base + 'App/AppInfo/appicon.ico', base + 'App/AppInfo/appicon_16.png',
                   base + 'App/AppInfo/appicon_32.png', base + 'Other/Source/source-identity.json',
-                  base + 'Data/TraceGuard/']
+                  base + 'Data/TraceGuard/', base + 'Other/Source/Configure-Browser-SignIn.cmd',
+                  base + 'Other/Source/Diagnose-Browser-SignIn.cmd',
+                  base + 'Other/Source/Diagnose-Browser-SignIn.ps1']
         if set(needed) - names: raise RuntimeError(f'ZIP missing: {sorted(set(needed)-names)}')
         if any(x.startswith('/') or '..' in x.split('/') or '\\' in x for x in names):
             raise RuntimeError('ZIP contains unsafe member names')

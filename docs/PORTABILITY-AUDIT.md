@@ -1,3 +1,13 @@
+## b1r7 verified 3.6.11 source anchors (2026-11-21)
+
+The 3.6.11 stable release updates bundled Git to 2.56.1 per the official GitHub Desktop changelog. The exact 3.6.11 `main.ts`, `app-window.ts`, `notifications.ts`, `script/build.ts`, `app/app-info.ts`, and `app/package.json` were inspected through their immutable release-tag upstream URLs. Their required 3.6.10 portability anchors and development OAuth contract are still present. The builder now uses version-neutral, **preflighted and fail-closed** exact source shape checks; this is not an unrestricted patcher. `scripts/patch_source.py` checks all required anchors before edits. `scripts/resolve_release.py` no longer limits `latest` to 3.6.10.
+
+**Validation boundary:** These are SOURCE-INSPECTED source anchor findings, plus STATIC-VALIDATED local fixtures—not a completed 3.6.11 upstream Windows compilation, interactive OAuth or runtime portability test. A future version can keep all checked strings yet alter behavior elsewhere; new upstream features must still be assessed after a successful build. b1r6 remains USER-CONFIRMED for its own prior version.
+
+Source evidence: https://github.com/desktop/desktop/blob/release-3.6.11/app/src/main-process/main.ts ; https://github.com/desktop/desktop/blob/release-3.6.11/app/src/main-process/app-window.ts ; https://github.com/desktop/desktop/blob/release-3.6.11/app/src/main-process/notifications.ts ; https://github.com/desktop/desktop/blob/release-3.6.11/script/build.ts ; https://github.com/desktop/desktop/blob/release-3.6.11/app/app-info.ts
+
+---
+
 # Application-specific Windows portability audit
 
 Audit target: GitHub Desktop source release `release-3.6.10` (3.6.10). Source code locations were examined through upstream GitHub release-tag URLs during preparation of b1r1. Runtime traces were **not** captured on an actual Windows desktop. `source-identity.json` in future build outputs will identify the **full upstream commit** after exact tag checkout; do not assume a short release-list hash is the verified full commit.
@@ -24,7 +34,7 @@ Evidence labels indicate what is observed *in source* vs inferred. No row below 
 | --- | --- | --- | --- | --- | --- | --- |
 | Electron userData / log path | **SOURCE-INSPECTED**: `app/src/main-process/main.ts` imports logging, sets app logs; `app/src/lib/logging/get-log-path.ts` gets Electron `userData` | `%APPDATA%\GitHub Desktop` normally | Upstream + Electron | Not applicable | First imported `portable-bootstrap.ts` sets `userData`, `sessionData`, logs to `Data/Profile` | No broad APPDATA redirects; static patch test only; profile first-run/move **not yet verified** |
 | Installed binary versions + Squirrel | **SOURCE-INSPECTED** `app/src/main-process/squirrel-updater.ts` and `script/package.ts`; documented install path | `%LOCALAPPDATA%\GitHubDesktop` | Installer/updater | Not applicable | Source-built unpacked Electron app; app-window auto-updater disabled for portable launches | Protects installed program; check update UI **not yet verified** |
-| URL protocols | **SOURCE-INSPECTED**: `app/src/main-process/main.ts` calls `setAsDefaultProtocolClient` for `x-github-client`, `x-github-desktop-auth`, `github-windows` | HKCU Windows URL protocol class and shell choice (exact keys not runtime verified) | Upstream Electron + Windows shell | Not applicable | Prevents automatic protocol registration in portable mode | Installed handler preserved, **but browser OAuth sign-in may not work**. Explicit opt-in, rollback-safe handler implementation not provided. Manual test required |
+| URL protocols | **SOURCE-INSPECTED**: `app/src/main-process/main.ts` calls `setAsDefaultProtocolClient` for `x-github-client`, `x-github-desktop-auth`, `github-windows` | HKCU Windows URL protocol class and shell choice (exact keys not runtime verified) | Upstream Electron + Windows shell | Not applicable | Prevents automatic protocol registration in portable mode | All schemes other than `x-github-desktop-auth` remain suppressed; b1r4 opt-in launcher temporarily registers that specific scheme after journaling original HKCU values, then restores only on verified ownership. Browser sign-in still requires manual Windows test |
 | Notifications + toast CLSID | **SOURCE-INSPECTED**: `app/src/main-process/notifications.ts` + `find-toast-activator-clsid.ts` inspect installed Squirrel shortcuts; fallback known CLSID | Windows Start Menu and notification identity | App + native notifications + Windows shell | Not applicable | Separate portable CLSID, not installed Squirrel fallback | No borrowed installed CLSID; notification click activation not proven, may require per-user COM/shortcut registration |
 | Git global config | **SOURCE-INSPECTED**: `app/src/lib/git/config.ts` calls `git config --global`; `app/src/lib/git/core.ts` invokes dugite | HOME/.gitconfig or configured Git global file | Git dependency | Not applicable | Child-scoped `HOME`/`GIT_CONFIG_GLOBAL` in `Data/GitHome` | Existing host global config unchanged by these commands; Git extension/hook behavior still requires verification |
 | Git credentials | **SOURCE-INSPECTED dependency** `keytar` in `app/package.json`; **INFERRED** Windows Credential Manager usage from keytar | Windows credential vault (exact entries NOT captured) | Dependency / Windows | Not applicable | No token harvesting or unprotected plaintext copying; document non-mobility | **Hard portability limitation.** Sign-in across accounts/computers unverified; data possibly remains on host |
@@ -36,7 +46,7 @@ Evidence labels indicate what is observed *in source* vs inferred. No row below 
 
 ## TraceGuard / ShellGuard decision
 
-**No destructive post-exit TraceGuard/ShellGuard is shipped.** This is a deliberate, evidence-based safety decision rather than an assertion that no traces exist. Documented upstream application settings/log paths are redirected **before startup**. Automatic protocol registration and Squirrel updater are blocked at source. No safe, precisely attributable additional files/registry keys have been demonstrated through a Windows runtime trace. Broad post-exit harvesting of shared system directories or Credential Manager would risk data loss and installed-app interference.
+**No broad destructive post-exit TraceGuard/ShellGuard is shipped.** This is a deliberate, evidence-based safety decision rather than an assertion that no traces exist. Documented upstream application settings/log paths are redirected **before startup**. Broad upstream automatic protocol registration and Squirrel updater are blocked at source. b1r4 deliberately permits one bounded launcher-managed, opt-in authentication protocol, with exact-value recovery and host conflict protection. No safe, precisely attributable additional files/registry keys have been demonstrated through a Windows runtime trace. Broad post-exit harvesting of shared system directories or Credential Manager would risk data loss and installed-app interference.
 
 `Data/TraceGuard/` exists and is preserved, including when completely empty, for future *evidence-driven* additions. It is **not** a functioning registry/shortcut harvesting engine. Do not claim empty-directory recovery of foreign host state has been tested or implemented.
 
@@ -45,7 +55,7 @@ Evidence labels indicate what is observed *in source* vs inferred. No row below 
 - Project build uses exact 3.6.10 source. All future 3.6.11+ source layouts require another audit before patching; CI fails closed rather than applying assumptions.
 - Application startup under source-built unsigned Electron, authentication flows, Windows toast activator behavior, Git global config containment, and Windows Credential Manager entry ownership are **NOT YET VERIFIED**.
 - Changing GitHub Desktop's `userData` could interact with upstream settings migration and Squirrel assumptions. No installed profile is migrated by default.
-- Browser OAuth may be unavailable because protected installed URL protocols are not overridden. Use a normal installed GitHub Desktop for any blocked login flow until a verified, reversible opt-in callback implementation exists.
+- Browser OAuth is now opt-in and temporarily overrides only the Windows per-user auth callback; success remains unverified. If host UserChoice or concurrent installed app interferes, close the portable build and use normal installed GitHub Desktop rather than force-editing registry keys.
 - Windows x64 only. No ARM64 or 32-bit claims.
 
 ## Action audits (verified source and tag)
@@ -67,3 +77,13 @@ Actual read source files:
 - https://raw.githubusercontent.com/desktop/desktop/release-3.6.10/app/src/main-process/squirrel-updater.ts
 - https://raw.githubusercontent.com/desktop/desktop/release-3.6.10/app/src/lib/git/config.ts
 - https://raw.githubusercontent.com/desktop/desktop/release-3.6.10/script/build.ts
+
+## b1r5 process lifetime correction (2026-11-13)
+
+**SOURCE-INSPECTED:** b1r4 placed a `WaitForSingleObject(job, INFINITE)` after the direct Electron process quit, incorrectly treating job signaled state as all-processes-exited. Microsoft's Job Objects documentation restricts the job signaled state to end-of-job-time-limit handling. This left the main launcher or callback subprocesses at risk of indefinite waits, which is consistent with the user-observed lingering ~1.1 MB launcher and mutex-contention status. The exact root cause of failed OAuth is not proved by that observation alone.
+
+**b1r5 implementation:** nonblocking callback-only invocation, job accounting with `QueryInformationJobObject` and `ActiveProcesses` for the ordinary primary session, duplicate ordinary launches blocked, token-free diagnostics added, and recovery journal retained on indeterminate child state. Windows hosted child/grandchild fixture included; interactive Windows confirmation is still required. The exact upstream source adapter, consent prompt, single-scheme registry allowlist, previous-value journal and conditional host restoration are retained unchanged.
+
+## b1r6 source-built authentication identity
+
+Verified `release-3.6.10` upstream source: `app/app-info.ts` uses the public development OAuth client when no `DESKTOP_OAUTH_CLIENT_SECRET` is provided, setting `__DEV_SECRETS__=true`; `main.ts` then handles `x-github-desktop-dev-auth`. The b1r4/b1r5 root launcher instead handled only official `x-github-desktop-auth` and could not receive the development callback. The b1r6 launcher fixes the scheme identity without requiring upstream official release credentials. It recovers the old scheme's pending journal separately and registers only the development scheme after consent. Cross-scheme host state must never be merged or guessed. Actual Windows URI routing remains untested.

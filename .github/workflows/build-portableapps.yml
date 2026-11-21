@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       upstream_version:
-        description: 'latest suitable = currently audited 3.6.10; explicit stable X.Y.Z permitted if adapted'
+        description: 'Latest published stable (numeric semver) or explicit X.Y.Z; fail closed on incompatible source'
         required: true
         default: latest
         type: string
       package_revision:
         description: 'Package revision r1, r2, etc. Increase after launcher/patch changes'
         required: true
-        default: r3
+        default: r7
         type: string
       publish:
         description: 'Publish validated ZIP and PortableApps-style installer'
@@ -48,13 +48,13 @@ jobs:
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw 'Kit self-tests failed' }
 
-      - name: Choose latest source-audited stable GitHub Desktop version
+      - name: Resolve newest published stable GitHub Desktop source tag
         id: release
         shell: pwsh
         env:
           TARGET_VERSION: ${{ inputs.upstream_version }}
         run: |
-          python scripts/resolve_release.py --version "$env:TARGET_VERSION" --adapter-max 3.6.10 --output work/resolved.json
+          python scripts/resolve_release.py --version "$env:TARGET_VERSION" --output work/resolved.json
           if ($LASTEXITCODE -ne 0) { throw 'Release resolution failed' }
           $r = Get-Content work/resolved.json -Raw | ConvertFrom-Json
           "tag=$($r.tag)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -101,7 +101,7 @@ jobs:
           cache: yarn
           cache-dependency-path: work/source/yarn.lock
 
-      - name: Prepare exact fail-closed GitHub Desktop source changes
+      - name: Preflight and adapt stable GitHub Desktop source (strict source contracts)
         if: steps.already.outputs.skip != 'true'
         shell: pwsh
         run: |

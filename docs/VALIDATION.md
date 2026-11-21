@@ -1,3 +1,13 @@
+## b1r7 dynamic stable-release adapter status
+
+- **FILE-INSPECTED:** Submitted run `logs_121437119019.zip` resolved `release-3.6.11` (upstream commit prefix `0102f49a`), then failed at source patch Step 9 before compiling. It reports `No audited patch adapter for 3.6.11; supported upstream version: 3.6.10`.
+- **SOURCE-INSPECTED:** `release-3.6.11` upstream source retained the seven source patch anchors, early main-process import, dev OAuth-client switch, and the single-instance protocol handler flow. Official changelog identifies a bundled Git update to 2.56.1.
+- **STATIC-VALIDATED:** b1r7 local unit fixtures exercise stable resolver selection (including 3.6.11), exact 3.6.10 and 3.6.11 patch points, conservative future-version compatibility, OAuth drift rejection, and all-or-nothing preflight for an altered notification anchor.
+- **NOT YET VERIFIED:** Real hosted Windows 3.6.11 compilation, launcher PE, app GUI, OAuth callback, login persistence, host-state isolation, portable ZIP/installer execution and release publication.
+- **USER-CONFIRMED (prior baseline only):** b1r6 source-built portable app and browser sign-in reportedly worked. That evidence does not automatically carry forward to 3.6.11.
+
+---
+
 # Build-stage verification matrix — status at kit authoring
 
 | Stage | Status | Actual evidence available |
@@ -8,12 +18,12 @@
 | Shared Publisher v1.1.1 interface and release collision protection | SOURCE-INSPECTED | Exact `action.yml`, `publish.py` and release page |
 | Offline Python source patch, workflow string and ZIP-negative tests | STATIC-VALIDATED if local unit suite succeeds | `python -m unittest discover -s tests -v` output |
 | GitHub-hosted Windows source compilation and native dependency installation | WINDOWS-COMPILED (b1r2 user-run) | Logs `logs_117102594875.zip`: successful Yarn install and Electron packager output |
-| Actual Win64 C++ root launcher compilation | FAILED/BLOCKED (b1r2); NOT YET VERIFIED (b1r3) | b1r2 logs show CMD quoting error; b1r3 uses Developer PowerShell but has not been built yet |
+| Actual Win64 C++ root launcher compilation | FAILED/BLOCKED (b1r2); USER-CONFIRMED (b1r3 base launcher); NOT YET VERIFIED (b1r4 new launcher) | b1r2 logs show CMD quoting error; b1r3 uses Developer PowerShell but has not been built yet |
 | Actual GitHub Desktop app launched from root launcher | NOT YET VERIFIED | Requires interactive Windows GUI test |
 | Electron profile, Chromium and Git global data containment | NOT YET VERIFIED | Requires runtime file-system monitoring |
 | Host credential-store isolation / authentication persistence | NOT YET VERIFIED; known risk | keytar/GCM behavior may be host-bound |
 | TraceGuard foreign host-data recovery | NOT IMPLEMENTED / NOT CLAIMED | Early profile redirection used; no host-scavenging logic |
-| ShellGuard protocol cleanup | NOT REQUIRED FOR SUPPRESSED SOURCE PATH; broader runtime unverified | Automatic protocol registration prevented in source; no generalized cleanup |
+| ShellGuard protocol cleanup | STATIC-VALIDATED (b1r4); WINDOWS-RUNTIME NOT YET VERIFIED | Opt-in, per-user auth scheme journal/conditional restoration; broad automatic source registrations still disabled |
 | Notification and browser sign-in success | NOT YET VERIFIED; potential failures | Manual GUI/OS integration testing required |
 | Independently validated ready-to-extract PortableApps ZIP | NOT YET VERIFIED | Build script contains tests; no large Windows app bytes created here |
 | Shared custom-NSIS installer generation | NOT YET VERIFIED | GitHub Actions must run |
@@ -30,7 +40,7 @@
 - **WINDOWS-COMPILED (b1r2 user-run):** Upstream GitHub Desktop source build generated `work/source/dist/GitHubDesktop-win32-x64` with exit code 0. This does not demonstrate launch or portability.
 - **FAILED/BLOCKED (b1r2 user-run):** Separate C++ launcher compilation failed before `cl.exe` due to nested CMD quoting and Visual Studio paths with spaces.
 - **STATIC-VALIDATED (b1r3):** Launcher compilation now calls supported Visual Studio Developer PowerShell and MSVC directly without temporary batch/cmd quoting; regression tests assert this design.
-- **NOT YET VERIFIED (b1r3):** Real MSVC launcher output, PortableApps ZIP and installer, interactive runtime.
+- **USER-CONFIRMED (b1r3 base launcher); NOT YET VERIFIED (b1r4 new launcher):** Real MSVC launcher output, PortableApps ZIP and installer, interactive runtime.
 
 The kit ZIP itself is a *source builder kit*, not a compiled PortableApps application. Static tests do not prove Windows runtime safety, and an Actions build success will still not prove GUI/OS integration.
 
@@ -38,7 +48,25 @@ The kit ZIP itself is a *source builder kit*, not a compiled PortableApps applic
 
 - Version drift: current fail-closed adapter accepts only exact 3.6.10; newer stable tags are intentionally not compiled until source review.
 - Upstream Node/Electron native modules, Git submodule downloads, bundled Git and package-manager postinstall may be sensitive to CI toolchain changes.
-- OAuth browser callback may be unavailable because Windows protocol registration is suppressed to protect the installed GitHub Desktop.
+- b1r3 OAuth browser callback **FAILED IN USER TEST**: missing `x-github-desktop-auth` registration. b1r4 adds opt-in session-scoped registration and crash-safe conditional restoration, but has not yet been Windows-tested.
 - Windows credential vault and Git Credential Manager may leave host-bound state despite portable profile paths.
 - Native notifications depend on Windows shortcut/CLSID infrastructure and are not fully resolved by `app.setAppUserModelId` alone.
 - Squirrel update paths are disabled; upgrades are handled by replacement of package-managed files only.
+
+- **STATIC-VALIDATED (b1r4):** 16 offline Python regression tests, package scripts and opt-in registry guard assertions.
+- **NOT YET VERIFIED (b1r4):** Actual new Win64 launcher build, isolated Windows HKCU fixture, real browser authentication, multiple-instance and crash recovery, portable ZIP/installer and publisher.
+- **USER-CONFIRMED (b1r3):** Existing GitHub Desktop GUI launched successfully, but browser authentication failed as shown in screenshots.
+
+## b1r4 user-reported defects, b1r5 correction
+
+- **USER-OBSERVED (b1r4):** GUI closes but `GitHubDesktopPortable.exe` remains running; OAuth browser screen does not return a signed-in app.
+- **FILE-INSPECTED:** user-provided consent contains `enabled`; TraceGuard status says a second portable launcher could not own the authentication mutex; the AGH4 journal is parseable and reports no pre-existing HKCU auth key. Current registry state is unknown.
+- **SOURCE-INSPECTED:** b1r4's normal and callback paths wait indefinitely on the job handle, but Windows job objects do not signal on ordinary active-process-zero. b1r5 replaces this with supported job-accounting API and makes callback-only launch one-shot. Duplicate ordinary launches fail closed.
+- **STATIC-VALIDATED (b1r5):** `python -m unittest discover -s tests -v` verifies source invariants and new Windows fixture wiring. This does not execute Win32 code on Linux.
+- **NOT YET VERIFIED (b1r5):** real Windows compilation, isolated child/grandchild job fixture, full callback delivery to Electron, browser OAuth, credential persistence, installer upgrades and publisher.
+
+## b1r6 upstream OAuth identity correction
+
+- **SOURCE-INSPECTED:** `app/app-info.ts` chooses `__DEV_SECRETS__ = true` for this source build with no injected OAuth client secret. The matching `app/src/main-process/main.ts` auth protocol is `x-github-desktop-dev-auth`, contrary to b1r4/b1r5's `x-github-desktop-auth` handler.
+- **STATIC-VALIDATED:** b1r6 guards the compiled webpack main.js against missing dev-auth scheme; its launcher uses independent old/new registry journals and retains the b1r5 lifecycle fixes. Python tests explicitly assert the scheme contract.
+- **NOT YET VERIFIED:** hosted Windows compilation of b1r6, actual browser redirect and token exchange, installer upgrade, registry recovery, installed-app coexistence, publisher.
